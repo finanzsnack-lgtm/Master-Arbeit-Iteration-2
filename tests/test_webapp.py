@@ -81,3 +81,40 @@ def test_zeige_karte_ohne_preisniveau_sendet_keinen_preis(tmp_path, monkeypatch)
 
     [nachricht] = websocket.gesendete_nachrichten
     assert nachricht["preis_pro_nacht_euro"] is None
+
+
+# Iteration 2 (Betreuer-Feedback: Quick Replies + Ladeindikator, siehe
+# doku/28_stage28_iteration2_ux_feedback_konzepte/README.md).
+
+def test_bot_sagt_ohne_schnellantworten_marker_sendet_reinen_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "erzeuge_client", lambda: _FakeMapsClient(erfolgreich=True))
+    websocket = _FakeWebSocket()
+    kanal = webapp.WebIOKanal(websocket, tmp_path / "sitzung123")
+
+    asyncio.run(kanal.bot_sagt("Wie ist Ihr Name?"))
+
+    [nachricht] = websocket.gesendete_nachrichten
+    assert nachricht == {"typ": "bot", "text": "Wie ist Ihr Name?"}
+
+
+def test_bot_sagt_mit_schnellantworten_marker_trennt_optionen_ab(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "erzeuge_client", lambda: _FakeMapsClient(erfolgreich=True))
+    websocket = _FakeWebSocket()
+    kanal = webapp.WebIOKanal(websocket, tmp_path / "sitzung123")
+
+    asyncio.run(kanal.bot_sagt("Möchten Sie ein Auto mieten?\n[SCHNELLANTWORTEN: Ja | Nein]"))
+
+    [nachricht] = websocket.gesendete_nachrichten
+    assert nachricht["text"] == "Möchten Sie ein Auto mieten?"
+    assert nachricht["schnellantworten"] == ["Ja", "Nein"]
+
+
+def test_zeige_status_sendet_phase(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "erzeuge_client", lambda: _FakeMapsClient(erfolgreich=True))
+    websocket = _FakeWebSocket()
+    kanal = webapp.WebIOKanal(websocket, tmp_path / "sitzung123")
+
+    asyncio.run(kanal.zeige_status("plant_reise"))
+
+    [nachricht] = websocket.gesendete_nachrichten
+    assert nachricht == {"typ": "status", "phase": "plant_reise"}

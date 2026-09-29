@@ -21,9 +21,35 @@ einzelner Konsolen-Prozess ohne Nebenläufigkeit, die dabei verpasst würde).
 """
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 from src.api.typen import Unterkunft
+
+# Iteration 2 (Betreuer-Feedback: Quick Replies im Chat, siehe
+# doku/28_stage28_iteration2_ux_feedback_konzepte/README.md): das LLM selbst entscheidet, ob und
+# welche Kurzantworten es einer Nachricht anbietet (Grundprinzip 1 – KEIN fest verdrahteter
+# Fragenkatalog-Trigger, siehe regelwerk.py "SCHNELLANTWORTEN"). Es hängt dafür optional GENAU EINE
+# letzte Zeile im Format "[SCHNELLANTWORTEN: Option 1 | Option 2]" an seine Nachricht an. Dieses
+# Modul parst/entfernt diese Zeile zentral, damit kein Kanal (Konsole, Browser) sie ungefiltert als
+# rohen Text zeigt – nur `WebIOKanal` (webapp.py) nutzt die extrahierten Optionen tatsächlich für
+# klickbare Chips, TextKanal/AudioKanal verwerfen sie einfach.
+_SCHNELLANTWORTEN_MUSTER = re.compile(r"\n?\[SCHNELLANTWORTEN:\s*(.+?)\]\s*$", re.IGNORECASE)
+_MAX_SCHNELLANTWORTEN = 4
+
+
+def zerlege_schnellantworten(text: str) -> tuple[str, list[str] | None]:
+    """Trennt eine optionale, vom LLM angehängte Schnellantworten-Zeile vom eigentlichen
+    Nachrichtentext. Gibt `(bereinigter_text, optionen)` zurück, `optionen` ist `None`, wenn keine
+    solche Zeile gefunden wurde (der Normalfall – die meisten Fragen bekommen keine Chips)."""
+    treffer = _SCHNELLANTWORTEN_MUSTER.search(text)
+    if not treffer:
+        return text, None
+    bereinigt = text[: treffer.start()].rstrip()
+    optionen = [teil.strip() for teil in treffer.group(1).split("|") if teil.strip()]
+    if not optionen:
+        return bereinigt, None
+    return bereinigt, optionen[:_MAX_SCHNELLANTWORTEN]
 
 
 class _SprachausgabeProtokoll(Protocol):
@@ -38,13 +64,17 @@ class IOKanal(Protocol):
     async def bot_sagt(self, text: str) -> None: ...
     async def nutzer_antwortet(self) -> str: ...
     async def zeige_karte(self, unterkunft: Unterkunft) -> None: ...
+    async def zeige_status(self, phase: str) -> None: ...
 
 
 class TextKanal:
     """Standard-Kanal: Konsolen-Ein-/Ausgabe."""
 
     async def bot_sagt(self, text: str) -> None:
-        print(f"Bot: {text}")
+        bereinigt, _optionen = zerlege_schnellantworten(text)
+        # Optionen werden hier bewusst verworfen (kein Klick-UI in der Konsole) – wären sie sichtbar
+        # geblieben, stünde die rohe "[SCHNELLANTWORTEN: ...]"-Zeile im Chat.
+        print(f"Bot: {bereinigt}")
 
     async def nutzer_antwortet(self) -> str:
         return input("Du:  ").strip()
@@ -53,6 +83,14 @@ class TextKanal:
         # Kein Bildschirm für Fotos in der Konsole – Name/Preisniveau nennt das LLM ohnehin schon
         # im gesprochenen/gedruckten Vorschlagstext, siehe vorschlaege.py::suche_unterkunft.
         pass
+
+    async def zeige_status(self, phase: str) -> None:
+        # Iteration 2: eigener, deutlicherer Hinweis für den einen bekannten Sonderfall (finale
+        # Reiseplanung kann bei "mittel"/"stark" Barrierefreiheit spürbar dauern, siehe
+        # CLAUDE.md "Performance-Hinweis", ENTSCHEIDUNGSLOG.md Phase 44) – in der Konsole reicht
+        # dafür eine einfache Zeile, kein Ladebalken nötig.
+        if phase == "plant_reise":
+            print("Bot: (Reiseroute wird berechnet – kann bei vielen Kandidaten etwas dauern ...)")
 
 
 class AudioKanal:
@@ -70,8 +108,11 @@ class AudioKanal:
         self._sprachausgabe = sprachausgabe
 
     async def bot_sagt(self, text: str) -> None:
-        print(f"Bot: {text}")
-        self._sprachausgabe.sage(text)
+        # Schnellantworten-Zeile auch hier entfernen – sonst würde die Sprachausgabe die rohe
+        # "[SCHNELLANTWORTEN: ...]"-Syntax laut vorlesen (siehe zerlege_schnellantworten oben).
+        bereinigt, _optionen = zerlege_schnellantworten(text)
+        print(f"Bot: {bereinigt}")
+        self._sprachausgabe.sage(bereinigt)
 
     async def nutzer_antwortet(self) -> str:
         print("Du:  (jetzt sprechen ...)")
@@ -81,6 +122,12 @@ class AudioKanal:
 
     async def zeige_karte(self, unterkunft: Unterkunft) -> None:
         pass  # siehe TextKanal.zeige_karte
+
+    async def zeige_status(self, phase: str) -> None:
+        if phase == "plant_reise":
+            hinweis = "Reiseroute wird berechnet – kann bei vielen Kandidaten etwas dauern ..."
+            print(f"Bot: ({hinweis})")
+            self._sprachausgabe.sage(hinweis)
 
 
 def erzeuge_kanal(

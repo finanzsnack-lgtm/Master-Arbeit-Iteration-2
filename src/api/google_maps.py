@@ -75,6 +75,7 @@ class MapsClient(Protocol):
     def geocode(self, adresse: str) -> tuple[float, float]: ...
     def ist_barrierefrei(self, place_id: str | None) -> bool | None: ...
     def lade_foto(self, foto_referenz: str, ziel_pfad: str, max_breite: int = 640) -> bool: ...
+    def hole_foto_referenz(self, place_id: str | None) -> str | None: ...
 
 
 class MockGoogleMapsClient:
@@ -153,6 +154,11 @@ class MockGoogleMapsClient:
         # `foto_referenz`, siehe suche_pois/suche_unterkuenfte oben) – False statt ein Bild zu
         # erfinden (Grundprinzip 1).
         return False
+
+    def hole_foto_referenz(self, place_id: str | None) -> str | None:
+        # Kein Places-Details-Zugriff im Mock-Modus – None statt eine Referenz zu erfinden
+        # (Grundprinzip 1), siehe GoogleMapsClient.hole_foto_referenz für die echte Variante.
+        return None
 
 
 # ENTFERNT (siehe Projektkonversation, "ich möchte klettern, nicht ins Gym"): die frühere feste
@@ -636,6 +642,26 @@ class GoogleMapsClient:
             return None
         antwort = self._get("place/details/json", {"place_id": place_id, "fields": "wheelchair_accessible_entrance"})
         return antwort.get("result", {}).get("wheelchair_accessible_entrance")
+
+    def hole_foto_referenz(self, place_id: str | None) -> str | None:
+        """
+        Nachlade-Fallback (Nutzerfeedback nach echtem Browser-Test, siehe
+        doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md, Punkt Fotos): `suche_pois`/
+        `suche_unterkuenfte` lesen `photos[0]` bereits direkt aus der Nearby-/Text-Search-Antwort
+        (siehe `_erste_foto_referenz`) – für manche echten Orte fehlt dieses Feld dort aber, obwohl
+        Google auf der eigentlichen Maps-Seite durchaus ein Foto zeigt (ein bekannter, nicht
+        vollständig dokumentierter Unterschied zwischen Search- und Details-Antwort). Ein separater
+        Place-Details-Aufruf mit `fields=photos` liefert in solchen Fällen teils zusätzlich/
+        stattdessen ein Foto. Bewusst NUR als gezielter Nachlade-Schritt für die kleine, bereits
+        feststehende Menge an POIs im FERTIGEN Reiseplan aufgerufen (siehe `fotos.py`
+        `lade_fotos_fuer_plan`), NICHT für jeden rohen Suchtreffer – analog zu `ist_barrierefrei`
+        oben (Performance-Hinweis, CLAUDE.md). Liefert `None` statt einer erfundenen Referenz, wenn
+        auch die Details-Antwort kein Foto hat (Grundprinzip 1).
+        """
+        if not place_id:
+            return None
+        antwort = self._get("place/details/json", {"place_id": place_id, "fields": "photos"})
+        return _erste_foto_referenz(antwort.get("result", {}))
 
     def lade_foto(self, foto_referenz: str, ziel_pfad: str, max_breite: int = 640) -> bool:
         """

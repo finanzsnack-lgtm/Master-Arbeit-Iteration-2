@@ -39,6 +39,44 @@ def maps_link(place_id: str | None) -> str | None:
     return _MAPS_LINK_VORLAGE.format(place_id=place_id) if place_id else None
 
 
+# Nutzerfeedback nach echtem Browser-Test (siehe
+# doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md, Punkt Standardbild Bahn/Auto): für
+# Hin-/Rückreise gibt es keinen einzelnen "Ort" mit einem echten Google-Foto – statt die Karte ohne
+# Bild zu lassen, zeigt sie ein Standardbild je Verkehrsmittel. Erkennung per Teilstring-Suche im
+# gelieferten Verkehrsmittel-Text (z.B. "Bahn (ICE)"), NICHT über eine feste Liste exakter Werte –
+# robuster gegenüber leicht variierenden Bezeichnungen aus google_maps.py/mock_data.py. Kein
+# Treffer (z.B. unbekanntes/neues Verkehrsmittel) liefert bewusst `None` statt ein irreführendes
+# Bild zu erzwingen.
+#
+# NACHTRAG (Nutzerfeedback mit konkreten Referenzfotos, siehe
+# doku/32_stage32_echte_reisefotos_eingabe_ausblenden/README.md): die ursprünglichen, selbst
+# gezeichneten SVG-Icons (Stage 30) wirkten zu abstrakt/comichaft – der Nutzer wollte echte,
+# stimmungsvolle Reisefotos wie bei einer realen Foto-App. `static/img/bahn.jpg`/`auto.jpg`/
+# `bus.jpg` sind echte Fotos von Unsplash, alle unter der Unsplash-Lizenz (kostenlos für
+# kommerzielle/private Nutzung, keine Genehmigung nötig, Namensnennung nicht Pflicht aber üblich –
+# siehe unsplash.com/license): bahn.jpg von Markus Winkler ("Silver and red bullet train",
+# Stuttgart Hbf), auto.jpg von Averie Woodard ("The way to the cabin"), bus.jpg von "C"
+# (@thecurlyone, Stirling/UK). Einzeln per Websuche gefunden UND VISUELL GEPRÜFT (mehrere erste
+# automatische Treffer passten trotz treffend klingender Beschreibung nicht zum Motiv oder waren
+# kostenpflichtige Unsplash+-Bilder) – nicht blind aus einer Text-Trefferliste übernommen.
+_STANDARDBILD_JE_VERKEHRSMITTEL = (
+    ("bahn", "/static/img/bahn.jpg"),
+    ("zug", "/static/img/bahn.jpg"),
+    ("fernbus", "/static/img/bus.jpg"),
+    ("bus", "/static/img/bus.jpg"),
+    ("auto", "/static/img/auto.jpg"),
+    ("pkw", "/static/img/auto.jpg"),
+)
+
+
+def _standardbild_url(verkehrsmittel: str) -> str | None:
+    verkehrsmittel_klein = verkehrsmittel.lower()
+    for suchbegriff, bild_url in _STANDARDBILD_JE_VERKEHRSMITTEL:
+        if suchbegriff in verkehrsmittel_klein:
+            return bild_url
+    return None
+
+
 # Deutsche Anzeige-Labels für Googles Distance-Matrix-`mode`-Werte (siehe `Besuch.anfahrt_modus`,
 # aufbereitung.py `ergaenze_anfahrt_modus_je_etappe`) – NUR für die Anzeige, keine eigene Logik.
 _VERKEHRSMITTEL_LABEL_JE_MODUS = {
@@ -149,12 +187,30 @@ def _teilstrecken_zeilen(alternative: ReiseAlternative, praefix: str = "  ") -> 
 
 
 def _zeitpunkt_text(plan: "Reiseplan", tag_nr: int, minuten_seit_tagesbeginn: int, praefix: str) -> str:
-    """`praefix` + relative Dauer (Standard, siehe `_format_dauer`) ODER `praefix` + echte Uhrzeit
-    (NUR ab Tag 2 UND nur, wenn der Nutzer F20 tagesstart_praeferenz tatsächlich beantwortet hat,
-    siehe `Reiseplan.tagesstart_minuten`) – Tag 1 bleibt IMMER relativ, weil die tatsächliche
-    Ankunftsuhrzeit der Hinreise nirgends bekannt ist (kein reales Ticket vorhanden, Grundprinzip 1)."""
+    """Baut eine Zeitangabe, entweder als ECHTE Uhrzeit oder als eindeutig verankerte relative
+    Angabe – NIE eine unverankerte, nackte Dauer wie "1h" (siehe Verlaufskommentar unten, das war
+    zweimal live missverständlich).
+
+    - Ab Tag 2, wenn der Nutzer F20 (tagesstart_praeferenz) tatsächlich beantwortet hat (siehe
+      `Reiseplan.tagesstart_minuten`): echte, vom Nutzer stammende Uhrzeit ("14:00 Uhr").
+    - Tag 1 (IMMER) und jeder Tag ohne F20-Antwort: es gibt keine echte Uhrzeit (kein reales Ticket
+      für die Hinreise, keine genannte Präferenz) – eine erfundene Uhrzeit wäre ein Verstoß gegen
+      Grundprinzip 1. VERLAUF: bis Iteration 1 stand hier eine nackte relative Dauer ("ab 1h – bis
+      2h") – Betreuer-Feedback aus der Iteration-1-Demo: liest sich wie eine AUFENTHALTSDAUER von
+      1 bis 2 Stunden, gemeint war aber ein Zeit*punkt*. Kurzzeitig (Iteration 2, Phase 56) stattdessen
+      eine "ca."-markierte ANGENOMMENE Uhrzeit (fiktiver Standard-Tagesbeginn) – nach echtem
+      Browser-Test wieder verworfen (Phase 57/58, Nutzerwunsch: "nicht eine Uhrzeit hinterschreiben,
+      sondern einfach nach Ankunft oder sowas"). JETZT: eine relative Dauer, aber mit einem
+      Ankerwort DIREKT AN JEDEM Zeitwert ("nach Ankunft"/"nach Tagesbeginn") statt einer isolierten
+      Zahl – dadurch bleibt sie ohne erfundene Uhrzeit UND ohne die alte Verwechslungsgefahr mit
+      einer Aufenthaltsdauer, weil jeder Wert klar als "so lange nach [Referenzpunkt]" erkennbar ist.
+    """
     if tag_nr == 1 or plan.tagesstart_minuten is None:
-        return f"{praefix} {_format_dauer(minuten_seit_tagesbeginn)}"
+        anker = "Ankunft" if tag_nr == 1 else "Tagesbeginn"
+        dauer = _format_dauer(minuten_seit_tagesbeginn)
+        if praefix == "bis":
+            return f"bis {dauer} nach {anker}"
+        return f"{dauer} nach {anker}"
     return f"{praefix} {_format_uhrzeit(plan.tagesstart_minuten + minuten_seit_tagesbeginn)} Uhr"
 
 
@@ -286,11 +342,14 @@ class Reiseplan:
     # keine echten Treffer gefunden wurden.
     markt_beispiele: list[POI] = field(default_factory=list)
     # Startuhrzeit (Minuten seit Mitternacht) NUR gesetzt, wenn F20 (tagesstart_praeferenz) vom LLM
-    # tatsächlich in `ReiseAnfrage.tagesstart_minuten` interpretiert wurde (siehe pipeline.py) –
-    # sonst würde eine reine Standardannahme als scheinbar reale Uhrzeit ausgegeben (Grundprinzip
-    # 1). Ermöglicht echte Uhrzeiten AB TAG 2 in
-    # der Ausgabe (siehe `_zeitpunkt_text`) – Tag 1 bleibt relativ, weil die tatsächliche
-    # Ankunftsuhrzeit der Hinreise nirgends bekannt ist (kein reales Fahrplan-Ticket vorhanden).
+    # tatsächlich in `ReiseAnfrage.tagesstart_minuten` interpretiert wurde (siehe pipeline.py).
+    # Ermöglicht ECHTE Uhrzeiten ab Tag 2 in der Ausgabe (siehe `_zeitpunkt_text`). Tag 1 bleibt
+    # IMMER ohne echte Uhrzeit (kein reales Fahrplan-Ticket für die Hinreise vorhanden), ebenso jeder
+    # Tag ohne diese Präferenz – dort verwendet `_zeitpunkt_text` eine relative Dauer MIT Ankerwort
+    # ("1h nach Ankunft"/"nach Tagesbeginn") statt einer echten oder angenommenen Uhrzeit (Nutzer-
+    # feedback nach echtem Browser-Test, Phase 57/58 – siehe
+    # doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md für die volle Herleitung inkl. der
+    # zwischenzeitlich verworfenen "ca."-Uhrzeit-Variante aus Iteration 2/Phase 56).
     tagesstart_minuten: int | None = None
 
 
@@ -302,16 +361,20 @@ _EINLEITUNG = (
 )
 
 
-def _uhrzeit_hinweis_text(plan: "Reiseplan") -> str | None:
-    """Einmaliger Hinweis, WARUM ab Tag 2 echte Uhrzeiten stehen, Tag 1 aber nicht – nur relevant,
-    wenn `tagesstart_minuten` überhaupt gesetzt ist (siehe Reiseplan-Doku)."""
+def _uhrzeit_hinweis_text(plan: "Reiseplan") -> str:
+    """Einmaliger Hinweis, wie die Zeitangaben zu lesen sind: Tag 1 IMMER relativ zur Ankunft (keine
+    reale Ankunftsuhrzeit der Hinreise bekannt), weitere Tage NUR dann mit echter Uhrzeit, wenn der
+    Nutzer F20 tatsächlich beantwortet hat – sonst ebenfalls relativ, zum Tagesbeginn."""
     if plan.tagesstart_minuten is None:
-        return None
+        return (
+            "Zeitangaben ohne feste Uhrzeit (z.B. \"1h nach Ankunft\"/\"nach Tagesbeginn\") sind "
+            "relativ zum jeweiligen Bezugspunkt zu lesen, nicht als Aufenthaltsdauer – Sie haben "
+            "keine eigene Tagesablauf-Präferenz genannt, daher keine erfundene Uhrzeit."
+        )
     return (
         f"Die Uhrzeiten ab Tag 2 basieren auf Ihrer angegebenen Tagesstart-Präferenz (ca. "
-        f"{_format_uhrzeit(plan.tagesstart_minuten)} Uhr). Tag 1 hängt von der tatsächlichen "
-        "Ankunftszeit der Hinreise ab, die nirgends real feststeht, und bleibt daher bei relativen "
-        "Zeitangaben."
+        f"{_format_uhrzeit(plan.tagesstart_minuten)} Uhr). Tag 1 bleibt relativ zur Ankunft (z.B. "
+        "\"1h nach Ankunft\"), da die tatsächliche Ankunftszeit der Hinreise nirgends real feststeht."
     )
 
 
@@ -860,6 +923,29 @@ def als_kartendaten(plan: Reiseplan, foto_url_fuer_place_id: Callable[[str | Non
             "maps_link": maps_link(plan.unterkunft_place_id),
         }
 
+    # Nutzerfeedback nach echtem Browser-Test (siehe
+    # doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md, Punkt Verleih-Karte): der lokale
+    # Verleih (F14, `lokaler_verleih_poi`) stand bisher NUR als Textsatz im fertigen Reiseplan
+    # (`_verleih_hinweis_text`), nicht als eigene Karte in der Web-UI. `None`, wenn kein Verleih
+    # gewünscht ODER trotz Wunsch keiner gefunden wurde (die ehrliche Fehlanzeige bleibt weiterhin
+    # NUR als Text erhalten, siehe `_verleih_hinweis_text` – hier keine "Verleih nicht gefunden"-
+    # Karte, analog zu `unterkunft` oben, das ebenfalls einfach entfällt statt leer angezeigt zu
+    # werden). KEIN "Vorschlag"-Label (kein `label` übergeben) – anders als die Markt-/Restaurant-
+    # Beispiele ist das ein bereits im Dialog bestätigter, konkreter Fund, keine lose Anregung.
+    verleih = None
+    if plan.lokaler_verleih_poi is not None:
+        # Nutzerfeedback (siehe doku/34_.../README.md): zusätzlich ein "Route ansehen"-Link wie bei
+        # den Tages-POI-Karten, hier IMMER von der Unterkunft zum Verleih (nicht von der jeweils
+        # vorherigen Station wie bei den Tagesrouten-Etappen – der Verleih ist kein Teil einer
+        # optimierten Route, sondern ein einzelner, eigenständiger Weg ab der Unterkunft). `None`,
+        # wenn keine Unterkunfts-Koordinaten bekannt sind (Grundprinzip 1: kein geratener Startpunkt).
+        verleih_routen_link = routen_link(
+            plan.unterkunft_koordinaten, (plan.lokaler_verleih_poi.x, plan.lokaler_verleih_poi.y), "walking"
+        )
+        verleih = poi_karte(plan.lokaler_verleih_poi, routen_link_wert=verleih_routen_link)
+        if plan.lokales_leihfahrzeug_gewuenscht:
+            verleih["kategorie"] = f"Verleih: {plan.lokales_leihfahrzeug_gewuenscht}"
+
     def reise_karte(
         name_praefix: str, richtung: BewerteteAlternative,
         ursprung: tuple[float, float] | str | None, ziel: tuple[float, float] | str | None,
@@ -874,7 +960,7 @@ def als_kartendaten(plan: Reiseplan, foto_url_fuer_place_id: Callable[[str | Non
         return {
             "name": f"{name_praefix}: {richtung.alternative.verkehrsmittel}",
             "beschreibung": beschreibung,
-            "foto_url": None,
+            "foto_url": _standardbild_url(richtung.alternative.verkehrsmittel),
             "maps_link": None,
             "routen_link": routen_link(ursprung, ziel, _TRAVELMODE_JE_VERKEHRSMITTEL.get(richtung.alternative.verkehrsmittel)),
         }
@@ -884,6 +970,7 @@ def als_kartendaten(plan: Reiseplan, foto_url_fuer_place_id: Callable[[str | Non
     return {
         "hinreise": reise_karte("Hinreise", plan.hinreise, plan.wohnort, hinreise_ziel, plan.hinreise_robustheit),
         "unterkunft": unterkunft,
+        "verleih": verleih,
         "tage": tage,
         "rueckreise": reise_karte("Rückreise", plan.rueckreise, hinreise_ziel, plan.wohnort, plan.rueckreise_robustheit),
         "sicherheitshinweis": plan.sicherheitshinweis,

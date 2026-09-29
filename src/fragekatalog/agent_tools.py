@@ -25,6 +25,7 @@ from claude_agent_sdk import McpSdkServerConfig, SdkMcpTool, create_sdk_mcp_serv
 
 from src.api.google_maps import MapsClient
 from src.api.typen import Unterkunft
+from src.audio.kanal import IOKanal
 from src.ausgabe.debug import schreibe_debug_datei
 from src.ausgabe.reiseplan import Reiseplan, als_text, sende_mail, speichere_datei, speichere_json, speichere_poi_uebersicht
 from src.datenaufbereitung.vertraeglichkeit import pruefe_barrierefreiheit_des_plans
@@ -58,6 +59,13 @@ class AgentSessionState:
     anfrage: ReiseAnfrage
     maps_client: MapsClient
     protokollierer: Protokollierer | None = None
+    # Iteration 2 (Betreuer-Feedback: Ladeindikator, siehe
+    # doku/28_stage28_iteration2_ux_feedback_konzepte/README.md): optionale Referenz auf denselben
+    # Kanal wie chat.py/webapp.py, NUR damit `plane_reise_und_abschliessen` unten kurz vor dem
+    # potenziell lange dauernden Planungsschritt ein `zeige_status`-Signal schicken kann. `None`
+    # ist der Standard (z.B. in bestehenden Tests, die AgentSessionState ohne Kanal aufbauen) –
+    # ohne Kanal wird das Signal einfach übersprungen, keine Pflichtangabe.
+    io_kanal: IOKanal | None = None
     ausgabe_basisname: str = "reiseplan_chat"
     abgebrochen: bool = False
     abgeschlossen: bool = False
@@ -473,6 +481,16 @@ def erstelle_tools(state: AgentSessionState) -> list[SdkMcpTool[Any]]:
             return _text_ergebnis(fehler, is_error=True)
 
         barrierefreiheit_strikt = bool(args.get("barrierefreiheit_bereits_gepruft", False))
+
+        # Iteration 2: eigenes Status-Signal VOR dem potenziell lange dauernden Planungsschritt
+        # (Optimierung 1+2, Monte-Carlo-Härtetest, ggf. sequenzielle Barrierefreiheits-Einzelprüfung
+        # je Kandidat – siehe CLAUDE.md "Performance-Hinweis", dokumentierter Live-Vorfall in
+        # ENTSCHEIDUNGSLOG.md Phase 44). `plane_reise` selbst ist synchron/blockierend; das Signal
+        # muss deshalb VOR dem Aufruf raus, damit es den Kanal noch erreicht, bevor die Event-Loop
+        # blockiert.
+        if state.io_kanal is not None:
+            await state.io_kanal.zeige_status("plant_reise")
+
         plan, nudge, debug_sammlung = plane_reise(
             state.anfrage, state.maps_client, barrierefreiheit_strikt=barrierefreiheit_strikt
         )

@@ -4,7 +4,7 @@ deterministisch, OHNE echten LLM-Aufruf. Ruft die rohen `handler`-Coroutinen der
 Objekte direkt auf (kein SDK-Server/keine echte Session nötig).
 """
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -365,6 +365,46 @@ def test_plane_reise_und_abschliessen_erfolgreich_bei_vollstaendigen_pflichtfeld
     m_poi_uebersicht.assert_called_once()
     poi_uebersicht_pfad = m_poi_uebersicht.call_args.args[1]
     assert poi_uebersicht_pfad.name == "reiseplan_test_pois.csv"
+
+
+def test_plane_reise_und_abschliessen_meldet_status_wenn_kanal_vorhanden(tmp_path):
+    # Iteration 2 (Betreuer-Feedback: Ladeindikator, siehe
+    # doku/28_stage28_iteration2_ux_feedback_konzepte/README.md): kurz vor dem potenziell lange
+    # dauernden Planungsschritt wird `io_kanal.zeige_status("plant_reise")` aufgerufen – NUR, wenn
+    # überhaupt ein Kanal übergeben wurde (Standard bleibt `None`, siehe AgentSessionState).
+    anfrage = _vollstaendige_anfrage()
+    plan = _leerer_plan()
+    fake_kanal = AsyncMock()
+    state = _basis_state(anfrage=anfrage, ausgabe_basisname=str(tmp_path / "reiseplan_test"), io_kanal=fake_kanal)
+    tools = erstelle_tools(state)
+
+    with patch("src.fragekatalog.agent_tools.plane_reise", return_value=(plan, None, PlanungsDebugSammlung())), \
+         patch("src.fragekatalog.agent_tools.speichere_datei"), \
+         patch("src.fragekatalog.agent_tools.speichere_json"), \
+         patch("src.fragekatalog.agent_tools.speichere_poi_uebersicht"), \
+         patch("src.fragekatalog.agent_tools.sende_mail"):
+        _rufe(tools, "plane_reise_und_abschliessen")
+
+    fake_kanal.zeige_status.assert_called_once_with("plant_reise")
+
+
+def test_plane_reise_und_abschliessen_ohne_kanal_wirft_nicht(tmp_path):
+    # Standardfall in bestehenden Tests (kein io_kanal übergeben) – darf nicht scheitern, das
+    # Status-Signal wird dann einfach übersprungen (siehe agent_tools.py).
+    anfrage = _vollstaendige_anfrage()
+    plan = _leerer_plan()
+    state = _basis_state(anfrage=anfrage, ausgabe_basisname=str(tmp_path / "reiseplan_test"))
+    assert state.io_kanal is None
+    tools = erstelle_tools(state)
+
+    with patch("src.fragekatalog.agent_tools.plane_reise", return_value=(plan, None, PlanungsDebugSammlung())), \
+         patch("src.fragekatalog.agent_tools.speichere_datei"), \
+         patch("src.fragekatalog.agent_tools.speichere_json"), \
+         patch("src.fragekatalog.agent_tools.speichere_poi_uebersicht"), \
+         patch("src.fragekatalog.agent_tools.sende_mail"):
+        ergebnis = _rufe(tools, "plane_reise_und_abschliessen")
+
+    assert not ergebnis.get("is_error")
 
 
 def test_plane_reise_und_abschliessen_schreibt_debug_datei_neben_dem_protokoll(tmp_path):

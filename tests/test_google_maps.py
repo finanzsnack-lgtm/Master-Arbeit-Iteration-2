@@ -344,6 +344,35 @@ def test_ist_barrierefrei_ohne_place_id_ueberspringt_api_aufruf():
 
 
 @patch("src.api.google_maps.requests.get")
+def test_hole_foto_referenz_liest_erstes_foto_aus_details_antwort(mock_get):
+    # Iteration 2, Stage 30 (Nutzerfeedback: manche echten Orte liefern in der ursprünglichen Suche
+    # kein `photos`-Feld, ein separater Details-Aufruf hat teils trotzdem eins).
+    mock_get.return_value = _mock_antwort(
+        {"status": "OK", "result": {"photos": [{"photo_reference": "foto-abc"}]}}
+    )
+    client = GoogleMapsClient(api_key="dummy-key")
+
+    assert client.hole_foto_referenz("abc123") == "foto-abc"
+    aufgerufene_url = mock_get.call_args.args[0]
+    assert "place/details/json" in aufgerufene_url
+    assert mock_get.call_args.kwargs["params"]["place_id"] == "abc123"
+    assert mock_get.call_args.kwargs["params"]["fields"] == "photos"
+
+
+@patch("src.api.google_maps.requests.get")
+def test_hole_foto_referenz_ohne_foto_in_details_antwort_liefert_none(mock_get):
+    mock_get.return_value = _mock_antwort({"status": "OK", "result": {}})
+    client = GoogleMapsClient(api_key="dummy-key")
+
+    assert client.hole_foto_referenz("abc123") is None
+
+
+def test_hole_foto_referenz_ohne_place_id_ueberspringt_api_aufruf():
+    client = GoogleMapsClient(api_key="dummy-key")
+    assert client.hole_foto_referenz(None) is None
+
+
+@patch("src.api.google_maps.requests.get")
 def test_suche_pois_uebernimmt_erste_foto_referenz(mock_get):
     def antworten_je_aufruf(url, params=None, timeout=None):
         if "geocode" in url:

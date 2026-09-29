@@ -1,3 +1,4 @@
+
 # Entscheidungslog — Reisebot-Prototyp
 
 Dieses Dokument hält den Programmierprozess nachvollziehbar fest: **was**
@@ -2105,6 +2106,301 @@ Feld, keine neue Fachlogik:
   laut `schema.py`-Kommentar direkt das TATSÄCHLICHE Tagesbudget für Optimierung 1 (ersetzt sonst
   einen festen Konfigurations-Default) und ist bereits `pflichtfeld=False` mit sinnvollem Fallback-
   Verhalten bei vager/fehlender Antwort – also geringe Gesprächslast bei echtem Planungsnutzen.
+
+## Phase 56 — Iteration 2 beginnt: Web-UI-Feedback der Betreuer umgesetzt (09.09.2026)
+
+Fünf Rückmeldungen aus der Iteration-1-Demo (`Iteration 1/DEMO Feedbag.txt`), Konzeptphase +
+Umsetzung in einem Zug nach Abstimmung mit dem Product Owner. Ausführliche Konzeptbegründung siehe
+`doku/28_stage28_iteration2_ux_feedback_konzepte/README.md`.
+
+- **Was (1) Layout:** `static/index.html` zeigt den Reiseplan ab 980px Breite in einer zweiten
+  Spalte neben statt unter dem Chat (CSS Grid, `#chat`/`#ergebnis` als Grid-Areas), darunter bleibt
+  es bei der bisherigen gestapelten Darstellung. Ein neuer `#ergebnis-platzhalter` füllt die rechte
+  Spalte, bevor ein Ergebnis vorliegt.
+- **Warum (1):** Direkter Betreuer-Wunsch aus der Demo.
+- **Was (2) Zeitanzeige:** GRUNDSATZENTSCHEIDUNG (mit Product Owner abgestimmt). Bisher zeigte
+  `reiseplan.py::_zeitpunkt_text` an Tag 1 und an Tagen ohne beantwortete Tagesablauf-Präferenz
+  (F20) eine relative Dauer seit Tagesbeginn ("ab 1h – bis 2h") – Betreuer-Feedback: das wurde als
+  AUFENTHALTSDAUER von 1–2 Stunden gelesen, gemeint war aber ein Zeit*punkt*. Jetzt: ein neuer,
+  fester angenommener Standard-Tagesbeginn (`EINSTELLUNGEN.standard_tagesstart_minuten`,
+  `STANDARD_TAGESSTART_MINUTEN` in `.env`, Default 09:00 Uhr) plus "ca."-Präfix ("ca. 14:00 Uhr").
+  `_uhrzeit_hinweis_text` erklärt jetzt IMMER (vorher nur wenn `tagesstart_minuten` gesetzt war),
+  worauf sich "ca."-Zeiten stützen.
+- **Warum (2):** Das Projekt hatte diese relative Darstellung ursprünglich BEWUSST gewählt, um KEINE
+  erfundene Uhrzeit zu zeigen (Grundprinzip 1 – siehe der alte Kommentar an
+  `Reiseplan.tagesstart_minuten`, jetzt aktualisiert). Echtes Nutzerfeedback zeigte aber, dass die
+  Alternative (relative Dauer) missverständlich genug ist, um selbst zu einem Problem zu werden. Die
+  "ca."-Markierung ist der abgestimmte Mittelweg: liest sich wie eine normale Uhrzeit, bleibt aber
+  erkennbar als Annahme gekennzeichnet statt wie eine unmarkierte, aber tatsächlich erfundene
+  Tatsache.
+- **Was (3) Schnellantworten (Quick Replies):** Bewusst NICHT im deterministischen Layer verdrahtet,
+  sondern eine reine, vom LLM selbst gesteuerte Konvention (Grundprinzip 1): `regelwerk.py` erlaubt
+  dem LLM optional eine letzte Nachrichtenzeile im Format
+  `[SCHNELLANTWORTEN: Option 1 | Option 2]` (max. 4 Optionen) bei Ja/Nein-artigen Fragen. Neue
+  Funktion `zerlege_schnellantworten` (`src/audio/kanal.py`) trennt diese Zeile vom angezeigten
+  Text; `WebIOKanal.bot_sagt` (`webapp.py`) schickt die Optionen zusätzlich als `schnellantworten`
+  im WebSocket-JSON, die Web-UI rendert sie als Klick-Chips UNTER der Nachricht. Kein sechstes Tool
+  – die dokumentierte "fünf Werkzeuge"-Architektur bleibt unverändert.
+- **Warum (3):** Ausdrücklicher Nutzerwunsch: Chips dürfen NIE die Eingabe auf die angebotenen
+  Optionen beschränken (Textfeld bleibt immer zusätzlich nutzbar) und müssen inhaltlich beim LLM
+  bleiben statt fest im Code für bestimmte Fragen einprogrammiert zu sein. Braucht eine
+  Ja/Nein-Antwort mehr Kontext, stellt das LLM ganz normal eine Rückfrage – kein Sondermechanismus.
+- **Was (4) Ladeindikator:** Zwei Ebenen. (a) Allgemein: `static/index.html` zeigt nach jedem
+  Senden eine animierte "Bot schreibt"-Bubble (`.tippt`), die bei JEDER Serverantwort verschwindet
+  – reine Frontend-Änderung. (b) Speziell: `IOKanal` (`src/audio/kanal.py`) bekommt eine neue
+  Methode `zeige_status(phase)` (No-Op in TextKanal außer einer Konsolenzeile, echtes
+  WebSocket-Signal `{typ:"status", phase}` in `WebIOKanal`). `AgentSessionState` (`agent_tools.py`)
+  bekommt dafür ein neues, optionales Feld `io_kanal` (Default `None`, damit bestehende Tests ohne
+  Kanal weiter funktionieren); `plane_reise_und_abschliessen` ruft `zeige_status("plant_reise")`
+  kurz VOR dem synchronen, blockierenden `plane_reise`-Aufruf auf. Die Web-UI zeigt dafür eine
+  eigene Karte im `#ergebnis-platzhalter` statt nur der generischen Tipp-Animation.
+- **Warum (4):** CLAUDE.md dokumentiert unter "Performance-Hinweis" und ENTSCHEIDUNGSLOG.md Phase 44
+  einen echten Live-Vorfall: die finale Planung kann bei "mittel"/"stark" Barrierefreiheit durch
+  sequenzielle Google-Places-Einzelprüfungen spürbar lange dauern und wirkt dabei wie ein
+  Einfrieren. Eine generische Tipp-Animation würde diesen einen bekannten Sonderfall nicht ehrlich
+  von einer kurzen, normalen Denkpause unterscheidbar machen.
+- **Was (5) Bot-Avatar:** Kleines rundes Icon (🧭) links neben jeder Bot-Sprechblase
+  (`.nachricht-zeile`/`.avatar` in `static/index.html`), inklusive der neuen Tipp-Animation. Bewusst
+  schlicht, kein Name/Charakter.
+- **Warum (5):** Direkter Betreuer-Wunsch aus der Demo, ohne größeren Umfang (Charakter/Name wäre
+  eine eigene, spätere Entscheidung).
+- Betroffene Vorher-Stände als `code_stand/`-Duplikat gesichert, siehe
+  `doku/28_stage28_iteration2_ux_feedback_konzepte/`. Drei bestehende Tests an das neue
+  Zeitformat angepasst (`tests/test_reiseplan.py`), neue Tests für `zerlege_schnellantworten`
+  (`tests/test_kanal.py`), das `zeige_status`-Signal (`tests/test_agent_tools.py`) und
+  `WebIOKanal.bot_sagt`/`zeige_status` (`tests/test_webapp.py`) ergänzt. Komplette Suite grün
+  (325/325).
+- Offen: Konzept 1 (Layout) und Konzept 5 (Avatar) noch nicht in einem echten Browser gegen die
+  Live-API verifiziert, nur gegen die Testsuite/durch Code-Review. Konzept 3 (Schnellantworten)
+  hängt vom tatsächlichen LLM-Verhalten ab (folgt es der neuen Regelwerk-Anweisung zuverlässig?) –
+  noch nicht in einer echten Chat-Session beobachtet.
+
+## Phase 57 — Layout-Korrektur nach erstem Browser-Test: Chat bleibt zentriert bis zum Abschluss (17.09.2026)
+
+Genau der in Phase 56 als offen vermerkte erste echte Browser-Test von Konzept 1 (Layout) fand
+statt – per Screenshot belegt.
+
+- **Was:** In Phase 56 griff das Zwei-Spalten-Layout (Chat links, Reiseplan-Platzhalter rechts)
+  rein breitenabhängig (`@media (min-width: 980px)`), also schon WÄHREND des laufenden Gesprächs.
+  Nutzerfeedback: soll es nicht – während des Gesprächs soll der Chat wie ursprünglich (vor
+  Iteration 2) groß und zentriert bleiben, OHNE jede sichtbare Andeutung, wo/wie der Reiseplan
+  später erscheint. Erst nach der letzten Antwort soll der Chat klein werden/an die Seite rücken
+  und der fertige Plan groß in die Mitte kommen. Umsetzung: `<main>` bekommt `id="app"`, das
+  Zwei-Spalten-Grid in `static/index.html` gilt jetzt nur noch für `main.abgeschlossen`
+  (zusätzlich zur Mindestbreite) – diese Klasse setzt `zeigeErgebnis()` genau dann, wenn die echte
+  "ergebnis"-Nachricht vom Server eintrifft, nicht früher. Der bisherige `#ergebnis-platzhalter`
+  (Platzhaltertext + der Web-Sonderfall-Ladeindikator aus Phase 56) wurde entfernt; das
+  "Reiseroute wird berechnet ..."-Signal erscheint jetzt stattdessen als eigene Sprechblase IM
+  CHAT (mit Avatar), statt den bis dahin unsichtbaren Reiseplan-Bereich vorzeitig aufzudecken.
+- **Warum:** Der ursprüngliche Ansatz aus Phase 56 verwechselte "ab dieser Bildschirmbreite Platz
+  für zwei Spalten" mit "ab diesem Gesprächsstand soll der Reiseplan sichtbar werden" – zwei
+  unabhängige Bedingungen, die beide erfüllt sein müssen, nicht nur die Breite. Ohne echten
+  Browser-Test wäre dieser Unterschied am reinen Code nicht aufgefallen (Pytest deckt CSS/DOM-
+  Zustandsübergänge nicht ab).
+- Ausführliche Doku siehe `doku/29_stage29_layout_chat_bis_abschluss_zentriert/README.md`, Vorher-
+  Stand von `static/index.html` als Code-Duplikat gesichert. Betrifft ausschließlich Frontend-Code,
+  komplette Python-Testsuite unverändert grün (325/325); JS-Syntax mit Node.js geprüft.
+- Offen: der korrigierte Übergang selbst (Chat groß → Abschluss-Nachricht → Layoutwechsel) noch
+  nicht in einem echten Browser beobachtet, nur die JS-Syntax geprüft.
+
+## Phase 58 — Sechs Nutzerrückmeldungen: Zeitanzeige, Fotos, Standardbilder, Verleih-Karte, Layout, Avatar (17.09.2026)
+
+Direktes Nutzerfeedback nach Nutzung der Web-UI, VOR der Umsetzung erst in sechs klare Aufgaben
+gefasst und per Rückfrage bestätigt (vier echte Entscheidungsfragen). Ausführliche Doku siehe
+`doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md`.
+
+- **Was (1) Zeitanzeige:** WEITERE Korrektur nach Phase 57 – die dort eingeführte "ca. HH:MM
+  Uhr"-Anzeige für Tag 1/Tage ohne F20-Antwort wollte der Nutzer nicht ("nicht eine Uhrzeit
+  hinterschreiben, sondern einfach nach Ankunft oder sowas"), und zwar für ALLE Tage ohne bekannte
+  Zeit, nicht nur Tag 1. `_zeitpunkt_text` (reiseplan.py) zeigt jetzt eine relative Dauer MIT
+  Ankerwort direkt am Wert ("15min nach Ankunft" für Tag 1, "nach Tagesbeginn" ab Tag 2 ohne
+  F20-Antwort) statt einer nackten Dauer (die alte, zweimal missverständliche Variante) ODER einer
+  angenommenen Uhrzeit (Phase 56, jetzt verworfen). Die jetzt ungenutzte Konstante
+  `EINSTELLUNGEN.standard_tagesstart_minuten`/`STANDARD_TAGESSTART_MINUTEN` wurde entfernt.
+- **Warum (1):** Der Ankerwort-Ansatz löst denselben Konflikt wie die "ca."-Variante (keine
+  erfundene Uhrzeit, aber auch keine als Aufenthaltsdauer missverständliche nackte Zahl), ohne
+  überhaupt eine (wenn auch markierte) Uhrzeit zu behaupten – das war der explizite Nutzerwunsch.
+- **Was (2) Fotos (echter Bug):** `fotos.py::lade_fotos_fuer_plan` lud bisher NUR Fotos für
+  Unterkunft + tatsächlich eingeplante Tagesrouten-POIs herunter – alle "Vorschlag"-Karten (Markt/
+  Café, Beispielrestaurants, Sondertage-/Touren-/Lernaktivitäts-Beispiele) und "Weitere
+  Empfehlungen" blieben IMMER ohne Foto (Nutzerbeispiel: Fischmarkt Brügge). Download deckt jetzt
+  alle POI-Kategorien ab, die `als_kartendaten` als Karte zeigt, plus den lokalen Verleih. Zusätzlich
+  neuer Nachlade-Fallback `GoogleMapsClient.hole_foto_referenz` (Places Details, `fields=photos`):
+  manche echten Orte liefern in der ursprünglichen Nearby-/Text-Search-Antwort kein `photos`-Feld,
+  obwohl Google Details dazu hat – wird NUR für die kleine, feststehende Menge an Karten im FERTIGEN
+  Plan versucht (Performance-Hinweis, CLAUDE.md), nicht für rohe Suchtreffer.
+- **Warum (2):** Der eingeschränkte Download-Scope war schlicht unvollständig – die betroffenen
+  Karten waren immer Kandidaten für ein Foto, nur der Code hat es nie versucht.
+- **Was (3) Standardbilder Bahn/Auto/Fernbus:** Hin-/Rückreise hatten bisher `foto_url: None`
+  fest verdrahtet (kein einzelner "Ort" mit Foto). Drei neue, selbst gestaltete SVG-Icons
+  (`static/img/bahn.svg`/`auto.svg`/`bus.svg`, schlichtes Flat-Design im Look der App, lizenzfrei)
+  werden über `reiseplan.py::_standardbild_url` per Teilstring-Suche im Verkehrsmittel-Text
+  zugeordnet; unbekannte Verkehrsmittel bekommen bewusst kein erzwungenes Icon (`None`).
+- **Warum (3):** Ausdrücklicher Nutzerwunsch ("Fotos machen das viel besser"), reale Fotos sind für
+  einen Verkehrsmittel-Typ ohne festen Ort aber nicht sinnvoll beschaffbar.
+- **Was (4) Verleih-Karte:** `als_kartendaten` liefert jetzt ein neues `"verleih"`-Feld (POI-Karte
+  mit Foto/Maps-Link, `kategorie` überschrieben mit "Verleih: <Fahrzeug>"), positioniert direkt
+  unter der Unterkunft (Nutzerentscheidung bei Rückfrage). `None`, wenn kein Verleih gewünscht/
+  gefunden – die ehrliche Fehlanzeige bleibt weiterhin nur als Text erhalten
+  (`_verleih_hinweis_text`), keine "nicht gefunden"-Karte. Kein "Vorschlag"-Label, da ein im Dialog
+  bereits bestätigter Fund.
+- **Warum (4):** Der lokale Verleih (F14) stand bisher nur als Fließtext im fertigen Reiseplan,
+  obwohl er wie jeder andere bestätigte Ort eine eigene Karte verdient.
+- **Was (5) Layout weiter zentriert:** Der Chat saß im Zwei-Spalten-Zustand (Phase 57) oben am Rand
+  (`position: sticky; top: 24px`). Jetzt vertikal mittig im sichtbaren Bereich (`top: 50%` +
+  `translateY(-50%)`, bleibt beim Scrollen sichtbar), schmalere Spalte, größerer Abstand zum
+  Reiseplan (`column-gap` 56px statt 24px) und mehr Innenpolster links/rechts, damit der Reiseplan
+  der optisch dominante, zentrale Bereich ist.
+- **Warum (5):** Nutzerwunsch nach dem ersten Blick auf den umgesetzten Zustand aus Phase 57 – der
+  Chat wirkte "in die Ecke gedrängt" statt bewusst platziert.
+- **Was (6) Avatar:** Kompass-Emoji (🧭) durch ein Gesichts-Emoji (😊) ersetzt. NOCH AM SELBEN TAG,
+  nach direktem Folge-Feedback mit einem Beispielbild eines Chatbot-Charakters als Stilvorlage:
+  das Emoji durch einen eigenen, komplett neu gezeichneten kleinen Bot-Charakter mit Kopf UND
+  angedeutetem Oberkörper ersetzt (`static/img/avatar.svg`, eigenes Original – nur die Grundidee
+  des Beispielbilds aufgegriffen, kein Nachbau, keine Urheberrechtsfrage). `erzeugeAvatar()`
+  erzeugt jetzt ein `<img>` statt Text; die vorherige Kreis-Hintergrundfarbe der `.avatar`-Regel
+  entfällt, da die Grafik ihre Form/Farbe selbst mitbringt. Für diesen zweiten Schritt KEIN
+  `code_stand`-Snapshot angelegt (wie Stationen 24–27, transparent vermerkt statt verschwiegen).
+- **Warum (6):** Nutzerwunsch: der Avatar sollte klar als "hier spricht eine Person" lesbar sein,
+  nicht als abstraktes Reise-Symbol – beim zweiten Feedback konkret ein Charakter mit Kopf und
+  Oberkörper statt eines reinen Gesichts-Emojis.
+- **Was (6, Nachtrag NOCH AM SELBEN TAG):** Der neu gezeichnete Bot-Charakter bestand zunächst aus
+  zwei separaten Formen (Kopf-Rechteck + Schultern-Ellipse), die sich nur an einem einzelnen Punkt
+  berührten – Nutzer-Feedback (Screenshot): sichtbarer Abstand/Naht zwischen Kopf und Körper. Erster
+  Fix (Ellipse näher an den Kopf verschoben) reichte beim tatsächlichen Rendern nicht: Kopf-
+  Eckenrundung und Ellipsen-Rand liefen an den Seiten weiterhin auseinander, sichtbare Kerbe blieb.
+  Endgültig behoben durch EINE einzige, durchgehende Pfad-Silhouette (Kopf + Oberkörper als ein
+  Pfad mit sanfter Taillierung) statt zweier separat positionierter Formen. Erstmals in diesem
+  Projekt per Headless-Browser (`msedge --headless --screenshot`) tatsächlich gerendert und visuell
+  geprüft, BEVOR das Ergebnis dem Nutzer gezeigt wurde, statt die Koordinaten nur rechnerisch
+  anzunehmen.
+- Vorher-Stände der übrigen fünf Punkte als `code_stand/`-Duplikat gesichert
+  (`doku/30_stage30_zeit_fotos_verleih_layout_avatar/`). Neue/angepasste Tests in
+  `tests/test_reiseplan.py`, `tests/test_fotos.py`, `tests/test_google_maps.py`. Komplette Suite
+  grün (335/335). JS-Syntax mit Node.js geprüft, neue `avatar.svg` auf Wohlgeformtheit geprüft.
+- Offen: Layout-Feinschliff (5) ist eine erste Annäherung an eine mündlich beschriebene Vorstellung,
+  nicht pixelgenau abgestimmt – nächster sinnvoller Schritt ist wieder ein Screenshot-Feedback wie
+  bei Phase 57. Der Foto-Fallback (2) wurde nicht gegen die echte Google-API verifiziert (kein
+  Live-Key in dieser Sitzung), nur die Anfragestruktur getestet.
+
+## Phase 59 — Schnellantworten-Anweisung nachgeschärft nach echtem Nutzertest (21.09.2026)
+
+Erster echter Blick auf Schnellantworten (Konzept 3, Phase 56) im laufenden Chat (Screenshot):
+Bei "Mit wem geht's denn ans Meer – reist du allein, mit Partner/in, Familie oder Freunden?" bot
+das LLM KEINE Klick-Chips an, obwohl die Frage selbst schon vier klar benennbare Optionen nennt und
+die bestehende Anweisung ("Ja/Nein ODER eine kurze, feste Handvoll Optionen") das bereits erlaubt
+hätte – genau der in Phase 56 als offener Punkt vermerkte Fall ("hängt vom tatsächlichen
+LLM-Verhalten ab ... noch nicht in einer echten Chat-Session beobachtet"). Nutzerwunsch: generell
+mehr/konsequentere Antwortmöglichkeiten im gesamten Chatprozess.
+
+- **Was:** `regelwerk.py`, Abschnitt SCHNELLANTWORTEN nachgeschärft (siehe
+  `doku/31_stage31_schnellantworten_nachgeschaerft/README.md` für die volle Fassung): Ton von
+  "darfst du optional" auf "der Regelfall, nicht die Ausnahme" verschärft; neue, direkt auf die
+  beobachtete Lücke zugeschnittene Regel – nennt das LLM in seiner Frage bereits konkrete
+  Beispielantworten im Fließtext, MUSS es dieselben Optionen zusätzlich als Chips anhängen; weitere
+  konkrete Fragekatalog-Beispiele ergänzt (Reisebegleitung, Ja/Nein-Fragen, Verkehrsmittel-
+  Präferenz); Ausschlussliste für echt offene Fragen explizit ausformuliert, damit die Verschärfung
+  nicht zu erfundenen Kategorien führt.
+- **Warum:** Die Technik (Parsing, Übertragung, Klick-Chips) war bereits fertig und getestet
+  (Phase 56) – die Lücke war reines Prompt-Verhalten, keine fehlende Funktion. Grundprinzip 1 bleibt
+  gewahrt: keine deterministische Verdrahtung, kein neues Tool, nur eine klarere, mit konkreten
+  Beispielen unterlegte Anweisung an dasselbe LLM-gesteuerte Werkzeug.
+- Vorher-Stand von `regelwerk.py` als `code_stand/`-Duplikat gesichert. Reiner Prompt-Text, keine
+  bestehende Testfunktion prüft den genauen Wortlaut – komplette Suite unverändert grün (335/335).
+- Offen: Prompt-Verhalten lässt sich nicht automatisiert verifizieren – ob die Nachschärfung
+  tatsächlich zu konsequenterem Verhalten führt, zeigt erst der nächste echte Chat-Test.
+
+## Phase 60 — Echte Reisefotos statt SVG-Icons, Eingabezeile nach Abschluss ausgeblendet, pytest.ini-Fund (21.09.2026)
+
+Zwei Rückmeldungen im selben Gespräch, siehe
+`doku/32_stage32_echte_reisefotos_eingabe_ausblenden/README.md`.
+
+- **Was (1) Fotos:** Nutzer schickte zwei echte Referenzfotos (ICE in Fahrt, Person mit Sonnenhut
+  am offenen Autofenster) und wollte die selbst gezeichneten SVG-Icons aus Phase 58 durch echte
+  Fotos ersetzt haben. Da ich keine Bilder generieren kann (nur Vektorgrafiken zeichnen oder echte
+  Dateien laden), nach Rückfrage per Websuche nach lizenzfreien Fotos gesucht (Unsplash-Lizenz).
+  WICHTIGER ARBEITSSCHRITT: die automatischen Text-Zusammenfassungen der Suchtreffer waren mehrfach
+  irreführend (ein als "Roadtrip-Auto mit Hut" beschriebenes Bild zeigte tatsächlich eine Nahaufnahme
+  eines Hutes auf einem parkenden Auto mit Anime-Aufkleber; ein als "ICE" beschriebener Treffer
+  zeigte nur ein Bahnhofsschild) – deshalb wurden mehrere Kandidaten heruntergeladen und TATSÄCHLICH
+  VISUELL GEPRÜFT (`Read`-Tool auf die heruntergeladene Datei), bevor einer übernommen wurde. Ein
+  Kandidat stellte sich zusätzlich als kostenpflichtiges Unsplash+-Bild heraus, verworfen. Final:
+  `static/img/bahn.jpg` (Markus Winkler), `auto.jpg` (Averie Woodard, sehr nah am Nutzer-Referenzfoto),
+  `bus.jpg` (proaktiv ergänzt für Stilkonsistenz, C/@thecurlyone) – alte SVGs entfernt,
+  `reiseplan.py::_STANDARDBILD_JE_VERKEHRSMITTEL` zeigt jetzt auf die `.jpg`-Dateien.
+- **Warum (1):** Echte Fotos wirken laut Nutzer hochwertiger als die Icon-Illustrationen; die
+  sorgfältige visuelle Prüfung statt blinder Übernahme war nötig, weil sich Text-Suchergebnisse als
+  unzuverlässig erwiesen – ein falsches/kostenpflichtiges Bild wäre sonst unbemerkt eingebaut worden.
+- **Was (2) Eingabezeile ausblenden:** Im fertigen Reiseplan-Zustand (kleiner Chat, seit Phase 57)
+  war die Eingabezeile weiterhin sichtbar, obwohl nach Abschluss technisch keine weitere Eingabe mehr
+  möglich ist (Sitzung endet serverseitig). `static/index.html` setzt jetzt `form.hidden = true`
+  statt nur einzelne Felder zu deaktivieren; dafür zusätzlich eine CSS-Regel
+  `form#eingabeform[hidden] { display: none; }` nötig, da die bestehende `display: flex`-Deklaration
+  sonst das native `hidden`-Verhalten überschrieben hätte.
+- **Was (3, Nebenfund):** Nach Punkt 1 schlugen zwei Tests fehl – nicht die echten Tests in
+  `tests/`, sondern die frisch nach `code_stand/tests/test_reiseplan.py` kopierte, eingefrorene
+  Vorher-Version (erwartet noch alte `.svg`-Pfade). `pytest.ini` schloss `doku/` nie von der
+  automatischen Testsammlung aus – ein latenter Fehler, unbemerkt, weil bisher nie zuvor eine
+  Testdatei in einen `code_stand`-Ordner kopiert wurde. Behoben über `norecursedirs = ... doku` in
+  `pytest.ini`.
+- **Warum (3):** Die `code_stand`-Konvention (1:1-Kopien vor nicht-trivialen Änderungen, siehe
+  `doku/README.md`) muss auch Testdateien unbedenklich einschließen können, ohne die echte Suite zu
+  verfälschen – der Ausschluss gehört strukturell in die pytest-Konfiguration, nicht in eine Regel
+  "künftig keine Testdateien mehr kopieren".
+- Vorher-Stände von `reiseplan.py`, `index.html`, `test_reiseplan.py` als `code_stand/`-Duplikat
+  gesichert. Komplette Suite grün (335/335, nach dem `pytest.ini`-Fix). JS-Syntax mit Node.js
+  geprüft.
+- Offen: Der Bus im gewählten Foto ist vergleichsweise klein im Bildausschnitt (Luftaufnahme) – ob
+  das im 220×130px-Kartenausschnitt gut genug erkennbar bleibt, noch nicht in einem echten Browser
+  geprüft.
+
+## Phase 61 — Chat-Verlauf: horizontales Scrollen behoben (21.09.2026)
+
+Nutzer meldete per Screenshot einen horizontalen Scrollbalken im Chatverlauf, trotz bereits schmal
+umgebrochenem Text. Anforderung: der Chat soll in der Breite IMMER passen, vertikales Scrollen ist
+ausdrücklich gewünscht.
+
+- **Was:** Drei zusammenwirkende Ursachen in `static/index.html` gefunden und behoben. Hauptursache
+  ein CSS-Spezifikations-Quirk: `#verlauf` setzte nur `overflow-y: auto`, nie `overflow-x` – nach
+  Spec wird eine auf "visible" stehende Achse automatisch auf "auto" hochgestuft, sobald die andere
+  Achse einen Wert ungleich "visible" bekommt, wodurch `overflow-x` effektiv ebenfalls "auto" statt
+  "hidden" war. Explizit `overflow-x: hidden` ergänzt. Zusätzlich fehlte `.nachricht` ein
+  `overflow-wrap`/`word-break` (ein einzelnes langes Wort oder ein langer Link hätte die Sprechblase
+  in die Breite gedrückt), und `.hotel-karte-wrapper` hatte eine feste `width: 220px`, die im
+  schmalen Abschluss-Chat (`main.abgeschlossen`, Stage 29) nicht mehr sicher passte – auf
+  `width: 100%` mit `max-width: 220px` umgestellt. `.nachricht-zeile` zusätzlich `min-width: 0`
+  ergänzt (Flex-Kinder schrumpfen sonst nie unter ihre eigene Inhaltsbreite).
+- **Warum:** Alle drei Ursachen konnten unabhängig voneinander horizontalen Overflow im selben
+  Container erzeugen – eine einzelne Korrektur hätte das gemeldete Problem nicht zuverlässig
+  behoben.
+- Verifiziert über eine eigens gebaute Testseite (Original-CSS aus `static/index.html`, Nachricht
+  mit einem extrem langen leerzeichenlosen Testwort UND einem langen Link, schmales
+  `main.abgeschlossen`-Layout), per Headless-Browser (`msedge --headless --screenshot`) gerendert:
+  nur noch vertikaler Scrollbalken sichtbar. Komplette Python-Testsuite unverändert grün (335/335,
+  reine CSS-Änderung). Kein `code_stand`-Snapshot für diese Änderung angelegt (wie Stationen
+  24–27/30, transparent vermerkt).
+- Offen: nicht mit echten, langen LLM-Antworten in einem echten Browser geprüft, nur mit einer
+  synthetischen Testnachricht.
+
+## Phase 62 — Verleih-Karte: "Route ansehen" von der Unterkunft (21.09.2026)
+
+Nutzerwunsch zur Verleih-Karte aus Phase 58: der Google-Maps-Link soll bleiben, zusätzlich aber ein
+"Route ansehen"-Link darunter, wie ihn die Tages-POI-Karten bereits haben – bei der Verleih-Karte
+immer als Weg von der Unterkunft zum Verleih.
+
+- **Was:** `reiseplan.py::als_kartendaten` berechnet für die Verleih-Karte jetzt einen `routen_link`
+  über die bereits bestehende `routen_link()`-Funktion (dieselbe wie bei Tagesrouten-Etappen und
+  Hin-/Rückreise), Ursprung `plan.unterkunft_koordinaten`, Ziel die Verleih-Koordinaten,
+  `travelmode="walking"` fest (Verleih soll laut F14-Hintergrund nah an der Unterkunft liegen).
+  `None` ohne bekannte Unterkunfts-Koordinaten statt eines geratenen Startpunkts (Grundprinzip 1).
+  Keine Frontend-Änderung nötig – `karteHtml()` rendert ein vorhandenes `routen_link`-Feld bereits
+  generisch für jede Kartenart, die Verleih-Karte bekam bisher einfach nie einen Wert übergeben.
+- **Warum:** Konsistenz mit den übrigen Kartenarten, die alle bereits einen Routen-Link zeigen, wo
+  sinnvoll möglich.
+- Neuer Test `test_als_kartendaten_verleih_karte_zeigt_route_ab_unterkunft`, ergänzte Assertion im
+  bestehenden Verleih-Karten-Test. Komplette Suite grün (336/336). Kein `code_stand`-Snapshot für
+  diese Änderung (wie Stationen 24–27/30/33, transparent vermerkt).
+- Offen: nicht in einem echten Browser geprüft, nur über die deterministischen Tests.
 
 ## Offene Punkte
 

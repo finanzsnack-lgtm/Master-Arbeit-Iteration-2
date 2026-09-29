@@ -130,6 +130,7 @@ async def hauptablauf(
         maps_client=erzeuge_client(),
         protokollierer=protokollierer,
         ausgabe_basisname=ausgabe_basisname,
+        io_kanal=io_kanal,
     )
     options = ClaudeAgentOptions(
         system_prompt=_ROLLENBESCHREIBUNG + "\n" + baue_regelwerk_text(reisewunsch),

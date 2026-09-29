@@ -34,6 +34,46 @@
     flex-direction: column;
     gap: 20px;
   }
+  /* Iteration 2, Korrektur nach echtem Browser-Test (siehe
+     doku/29_stage29_layout_chat_bis_abschluss_zentriert/README.md): WÄHREND des Gesprächs bleibt
+     es bei der ursprünglichen, einspaltigen, zentrierten Chat-Ansicht (siehe `main` oben) – vom
+     Reiseplan-Bereich ist nichts zu sehen, noch nicht einmal ein Platzhalter, solange nicht
+     wirklich ein fertiger Plan vorliegt. ERST wenn die Planung abgeschlossen ist, setzt das
+     Frontend die Klasse "abgeschlossen" auf <main> (siehe zeigeErgebnis() im Skript unten) und
+     wechselt AB DIESEM ZEITPUNKT auf ein Zwei-Spalten-Layout: Chat klein/kompakt links, der
+     fertige Reiseplan groß und zentral im Vordergrund rechts. Nur ab einer Mindestbreite (auf
+     einem Handy bleibt es gestapelt, Chat oben, Plan darunter – kein Platz für zwei Spalten).
+
+     Weitere Korrektur nach zweitem Nutzerfeedback (siehe
+     doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md): der Chat saß bisher oben am Rand
+     ("position: sticky; top: 24px"), wirkte dadurch in die Ecke gedrängt statt wie ein bewusst
+     platziertes, kleineres Nebenelement. Jetzt vertikal MITTIG im sichtbaren Bereich (sticky +
+     top:50%/translateY-Trick, bleibt beim Scrollen durch einen langen Reiseplan weiterhin
+     sichtbar, aber eben zentriert statt oben klebend), spürbar schmaler, mit deutlich mehr Abstand
+     zum Reiseplan (größeres gap) und mehr Luft am linken/rechten Rand (größeres Innenpolster), damit
+     der Reiseplan als der optisch dominante, zentrale Bereich wirkt. */
+  @media (min-width: 980px) {
+    main.abgeschlossen {
+      max-width: 1400px;
+      padding-left: 48px;
+      padding-right: 48px;
+      display: grid;
+      grid-template-columns: minmax(260px, 320px) 1fr;
+      grid-template-areas: "kopf kopf" "chat ergebnis";
+      align-items: start;
+      column-gap: 56px;
+      row-gap: 24px;
+    }
+    main.abgeschlossen > header { grid-area: kopf; }
+    main.abgeschlossen > #chat {
+      grid-area: chat;
+      position: sticky;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    main.abgeschlossen > #chat #verlauf { max-height: 38vh; }
+    main.abgeschlossen > #ergebnis { grid-area: ergebnis; }
+  }
   header h1 {
     font-size: 1.4rem;
     margin: 0 0 4px;
@@ -58,6 +98,15 @@
     gap: 10px;
     max-height: 55vh;
     overflow-y: auto;
+    /* Nutzerwunsch: der Chat soll in der Breite IMMER passen, nur nach oben/unten scrollen ist
+       gewünscht. Ohne dieses explizite "overflow-x" macht die CSS-Spezifikation aus dem alleinigen
+       "overflow-y: auto" automatisch AUCH "overflow-x: auto" (Quirk: sobald eine Achse einen Wert
+       ungleich "visible" bekommt, wird die andere von "visible" auf "auto" hochgestuft) – das war
+       die eigentliche Ursache des beobachteten horizontalen Scrollbalkens, nicht zu breiter Inhalt
+       allein.
+       WICHTIG: Vertikal darf trotzdem NICHT auch abgeschnitten werden – deshalb kein "overflow:
+       hidden" hier, sondern gezielt nur die X-Achse. */
+    overflow-x: hidden;
   }
   .nachricht {
     max-width: 80%;
@@ -66,6 +115,10 @@
     line-height: 1.45;
     white-space: pre-wrap;
     font-size: 0.95rem;
+    /* Ohne dies würde ein einzelnes langes Wort/eine lange URL in einer Bot-Antwort die Sprechblase
+       (und damit den ganzen Chat) in die Breite drücken statt zu umbrechen. */
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
   .nachricht.bot {
     background: var(--bot-blase);
@@ -84,10 +137,84 @@
     font-size: 0.85rem;
     font-style: italic;
   }
+  /* Iteration 2, Punkt 5 (Bot-Avatar): schlichtes rundes Icon links neben jeder Bot-Sprechblase –
+     bewusst kein Name/Charakter, nur ein wiedererkennbares visuelles Signal. */
+  .nachricht-zeile {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    max-width: 85%;
+    align-self: flex-start;
+    /* Ohne dies schrumpfen Flex-Kinder standardmäßig nie unter ihre eigene Inhaltsbreite ("min-width:
+       auto") – im schmalen Chat (siehe main.abgeschlossen) reichte "max-width" allein nicht immer. */
+    min-width: 0;
+  }
+  .nachricht-zeile .nachricht.bot {
+    align-self: auto;
+    max-width: 100%;
+    flex: 1;
+    min-width: 0;
+  }
+  /* Nutzerwunsch: ein eigener, kleiner Bot-Charakter mit Kopf+Oberkörper (Original-SVG,
+     static/img/avatar.svg) statt eines Emojis – bringt seine Form/Farbe schon selbst mit, deshalb
+     hier keine eigene Kreis-/Hintergrundfarbe mehr wie beim vorherigen Emoji-Avatar. */
+  .avatar {
+    flex-shrink: 0;
+    width: 30px;
+    height: 36px;
+    display: block;
+  }
+  /* Iteration 2, Punkt 4 (Ladeindikator): allgemeine "Bot schreibt"-Animation für die normale
+     Wartezeit nach dem Senden, verschwindet sobald irgendeine Antwort ankommt. */
+  .nachricht.tippt {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 12px 14px;
+  }
+  .nachricht.tippt span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-schwach);
+    animation: tippt-punkt 1.2s infinite ease-in-out;
+  }
+  .nachricht.tippt span:nth-child(2) { animation-delay: 0.2s; }
+  .nachricht.tippt span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes tippt-punkt {
+    0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-3px); }
+  }
+  /* Iteration 2, Punkt 3 (Schnellantworten): vom LLM optional vorgeschlagene Klick-Chips unter der
+     jeweiligen Bot-Nachricht – reine Eingabehilfe, das Textfeld bleibt daneben immer nutzbar. */
+  .schnellantworten {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-self: flex-start;
+    max-width: 85%;
+    margin-left: 34px;
+  }
+  .schnellantwort-chip {
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--akzent);
+    background: var(--akzent-hell);
+    color: var(--akzent);
+    font-size: 0.85rem;
+  }
+  .schnellantwort-chip:hover { background: var(--akzent); color: #fff; }
+  /* Iteration 2, Korrektur (siehe doku/29_.../README.md): eigene Sprechblase für den
+     Planungs-Status-Sonderfall im Chat selbst, statt den (bis dahin unsichtbaren) Reiseplan-
+     Bereich vorzeitig zu zeigen. */
+  .nachricht.planungs-status { font-style: italic; }
   .hotel-karte-wrapper {
     padding: 0;
     background: transparent;
-    width: 220px;
+    /* War vorher fest auf 220px – im schmalen Chat (main.abgeschlossen, Spalte ab 260px minus
+       Innenabstand) reichte das teils nicht mehr aus und erzwang horizontales Scrollen. Jetzt
+       flexibel bis maximal 220px, schrumpft in schmalen Containern stattdessen mit. */
+    width: 100%;
     max-width: 220px;
   }
   .hotel-karte-wrapper .karte { border-radius: 14px; border-bottom-left-radius: 4px; }
@@ -97,6 +224,10 @@
     padding: 12px;
     border-top: 1px solid var(--rand);
   }
+  /* Nutzerwunsch: nach Abschluss der Planung komplett ausgeblendet statt nur ausgegraut (siehe
+     Nachrichten-Listener unten, form.hidden = true) – ohne diese Regel würde die obige
+     "display: flex"-Deklaration das native hidden-Verhalten überschreiben. */
+  form#eingabeform[hidden] { display: none; }
   #eingabe {
     flex: 1;
     padding: 10px 12px;
@@ -196,7 +327,7 @@
 </style>
 </head>
 <body>
-<main>
+<main id="app">
   <header>
     <h1>Reisebot</h1>
     <p>Reiseplanungs-Prototyp (Masterarbeit) – erzähl mir, was dir für eine Reise vorschwebt.</p>
@@ -217,6 +348,7 @@
     <div id="nudge" class="nudge" style="display:none"></div>
     <div id="hinreise-bereich"></div>
     <div id="unterkunft-bereich"></div>
+    <div id="verleih-bereich"></div>
     <div id="tage-bereich"></div>
     <div id="weitere-bereich"></div>
     <div id="rueckreise-bereich"></div>
@@ -235,12 +367,89 @@ const sendenKnopf = document.getElementById("senden");
 const mikrofonKnopf = document.getElementById("mikrofon");
 const vorlesenKnopf = document.getElementById("vorlesen");
 
+// Iteration 2, Punkt 5 (Bot-Avatar): schlichtes rundes Icon links neben jeder Bot-Sprechblase,
+// siehe doku/28_stage28_iteration2_ux_feedback_konzepte/README.md.
+function erzeugeAvatar() {
+  // Nutzerwunsch (Beispielbild als Stilvorlage): statt eines Emojis ein eigener, kleiner
+  // Bot-Charakter mit Kopf UND angedeutetem Oberkörper – komplett neu gezeichnet
+  // (static/img/avatar.svg), damit kein fremdes Bild kopiert wird, nur die Grundidee
+  // (freundliches, rundes Bot-Gesicht) aufgegriffen.
+  const avatar = document.createElement("img");
+  avatar.className = "avatar";
+  avatar.src = "/static/img/avatar.svg";
+  avatar.alt = "";
+  avatar.setAttribute("aria-hidden", "true");
+  return avatar;
+}
+
 function anhaengen(text, klasse) {
   const el = document.createElement("div");
   el.className = "nachricht " + klasse;
   el.textContent = text;
-  verlauf.appendChild(el);
+  if (klasse === "bot") {
+    const zeile = document.createElement("div");
+    zeile.className = "nachricht-zeile";
+    zeile.appendChild(erzeugeAvatar());
+    zeile.appendChild(el);
+    verlauf.appendChild(zeile);
+  } else {
+    verlauf.appendChild(el);
+  }
   verlauf.scrollTop = verlauf.scrollHeight;
+  return el;
+}
+
+// Iteration 2, Punkt 4 (Ladeindikator, allgemeiner Fall): kurze "Bot schreibt"-Animation direkt
+// nach dem Senden, verschwindet sobald irgendeine Serverantwort ankommt (siehe Nachrichten-Listener
+// unten). Reine Frontend-Anzeige, kein Server-Signal nötig für diesen allgemeinen Fall.
+function zeigeTippt() {
+  entferneTippt();
+  const bubble = document.createElement("div");
+  bubble.className = "nachricht bot tippt";
+  bubble.innerHTML = "<span></span><span></span><span></span>";
+  const zeile = document.createElement("div");
+  zeile.id = "tippt-anzeige";
+  zeile.className = "nachricht-zeile";
+  zeile.appendChild(erzeugeAvatar());
+  zeile.appendChild(bubble);
+  verlauf.appendChild(zeile);
+  verlauf.scrollTop = verlauf.scrollHeight;
+}
+
+function entferneTippt() {
+  const el = document.getElementById("tippt-anzeige");
+  if (el) el.remove();
+}
+
+// Iteration 2, Punkt 3 (Schnellantworten): vom LLM optional vorgeschlagene Klick-Chips unter der
+// jeweils letzten Bot-Nachricht. Reine Eingabehilfe – das Textfeld bleibt daneben IMMER nutzbar,
+// ein Klick sendet die Option genauso wie eine getippte Antwort. Alte Chips verschwinden, sobald
+// irgendeine neue Nachricht abgeschickt wird (siehe sendeNachricht), damit nie veraltete Optionen
+// anklickbar herumstehen.
+let aktuelleSchnellantwortenZeile = null;
+
+function zeigeSchnellantworten(optionen) {
+  entferneSchnellantworten();
+  const zeile = document.createElement("div");
+  zeile.className = "schnellantworten";
+  optionen.forEach((option) => {
+    const knopf = document.createElement("button");
+    knopf.type = "button";
+    knopf.className = "schnellantwort-chip";
+    knopf.textContent = option;
+    knopf.addEventListener("click", () => sendeNachricht(option));
+    zeile.appendChild(knopf);
+  });
+  verlauf.appendChild(zeile);
+  verlauf.scrollTop = verlauf.scrollHeight;
+  aktuelleSchnellantwortenZeile = zeile;
+}
+
+function entferneSchnellantworten() {
+  if (aktuelleSchnellantwortenZeile) {
+    aktuelleSchnellantwortenZeile.remove();
+    aktuelleSchnellantwortenZeile = null;
+  }
 }
 
 const protokoll = location.protocol === "https:" ? "wss:" : "ws:";
@@ -261,25 +470,57 @@ socket.addEventListener("error", () => {
 });
 
 socket.addEventListener("message", (ereignis) => {
+  // Egal welche Art von Nachricht ankommt – die "Bot schreibt"-Animation hat ihren Zweck erfüllt.
+  entferneTippt();
   const daten = JSON.parse(ereignis.data);
   if (daten.typ === "bot") {
     anhaengen(daten.text, "bot");
     liesVor(daten.text);
+    if (daten.schnellantworten && daten.schnellantworten.length) {
+      zeigeSchnellantworten(daten.schnellantworten);
+    }
   } else if (daten.typ === "hotel_karte") {
     zeigeHotelKarteImVerlauf(daten);
+  } else if (daten.typ === "status") {
+    zeigePlanungsStatus(daten.phase);
   } else if (daten.typ === "ergebnis") {
     zeigeErgebnis(daten);
-    eingabe.disabled = true;
-    sendenKnopf.disabled = true;
-    mikrofonKnopf.disabled = true;
+    // Nutzerwunsch: die Planung ist an dieser Stelle endgültig abgeschlossen, eine weitere Eingabe
+    // ist technisch gar nicht mehr möglich (siehe chat.py::hauptablauf – die Sitzung endet mit dem
+    // Abschluss). Statt die Eingabezeile nur ausgegraut stehen zu lassen, blendet sie komplett aus
+    // – im kleinen Chat rechts bleibt dann nur der Gesprächsverlauf zum Nachlesen übrig.
+    form.hidden = true;
   }
 });
+
+// Iteration 2, Punkt 4 (Ladeindikator, Sonderfall): eigenes, deutlicheres Signal für den einen
+// bekannten Fall, in dem die finale Planung wirklich lange dauern kann (Barrierefreiheits-
+// Einzelprüfung je Kandidat, siehe CLAUDE.md "Performance-Hinweis"). Korrektur nach echtem
+// Browser-Test (siehe doku/29_stage29_layout_chat_bis_abschluss_zentriert/README.md): erscheint
+// als eigene Sprechblase IM CHAT (wie die Tipp-Animation, die sie ersetzt) statt den bis dahin
+// unsichtbaren Reiseplan-Bereich schon vorzeitig aufzudecken – der Nutzer soll vor Abschluss noch
+// gar nicht sehen, wo/wie der Reiseplan später erscheint.
+function zeigePlanungsStatus(phase) {
+  if (phase !== "plant_reise") return;
+  entferneTippt();
+  const bubble = document.createElement("div");
+  bubble.className = "nachricht bot planungs-status";
+  bubble.textContent = "Reiseroute wird berechnet – kann bei vielen Kandidaten etwas dauern ...";
+  const zeile = document.createElement("div");
+  zeile.className = "nachricht-zeile";
+  zeile.appendChild(erzeugeAvatar());
+  zeile.appendChild(bubble);
+  verlauf.appendChild(zeile);
+  verlauf.scrollTop = verlauf.scrollHeight;
+}
 
 function sendeNachricht(text) {
   const bereinigt = text.trim();
   if (!bereinigt) return;
+  entferneSchnellantworten();
   anhaengen(bereinigt, "nutzer");
   socket.send(JSON.stringify({ text: bereinigt }));
+  zeigeTippt();
   eingabe.value = "";
 }
 
@@ -464,6 +705,11 @@ function escapeHtml(text) {
 }
 
 function zeigeErgebnis(daten) {
+  // Korrektur nach echtem Browser-Test (siehe
+  // doku/29_stage29_layout_chat_bis_abschluss_zentriert/README.md): ERST jetzt, wo die Planung
+  // wirklich fertig ist, wechselt das Layout – vorher (siehe CSS) bleibt es bei der einspaltigen,
+  // zentrierten Chat-Ansicht ohne jede Andeutung, wo der Reiseplan später erscheinen wird.
+  document.getElementById("app").classList.add("abgeschlossen");
   document.getElementById("ergebnis").style.display = "flex";
 
   if (daten.nachhaltigkeits_nudge) {
@@ -484,6 +730,14 @@ function zeigeErgebnis(daten) {
   if (karten.unterkunft) {
     unterkunftBereich.innerHTML =
       `<div class="tag-titel">Unterkunft</div><div class="kartenreihe">${karteHtml(karten.unterkunft, "")}</div>`;
+  }
+
+  // Iteration 2, Stage 30 (Nutzerfeedback): lokaler Verleih (F14) als eigene Karte direkt unter der
+  // Unterkunft, nicht mehr nur als Textsatz im vollständigen Reiseplan weiter unten.
+  const verleihBereich = document.getElementById("verleih-bereich");
+  if (karten.verleih) {
+    verleihBereich.innerHTML =
+      `<div class="tag-titel">Verleih vor Ort</div><div class="kartenreihe">${karteHtml(karten.verleih, karten.verleih.kategorie)}</div>`;
   }
 
   const tageBereich = document.getElementById("tage-bereich");

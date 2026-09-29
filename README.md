@@ -28,6 +28,12 @@ heruntergeladen, siehe `src/ausgabe/fotos.py` – der Google-Maps-API-Key bleibt
 serverseitig, der Browser bekommt ihn nie zu sehen). Ohne echten Key (`MOCK_MODE` aktiv) erscheinen
 die Karten ohne Foto ("Kein Foto verfügbar") statt eines erfundenen Bildes.
 
+Seit Iteration 2 (siehe `../CLAUDE.md`, Abschnitt „Iteration 2: Oberfläche und Chat", und
+`doku/` Stationen 28–34): Während des Gesprächs bleibt der Chat groß und zentriert; erst mit dem
+fertigen Plan wechselt die Seite (ab 980px Breite) in zwei Spalten mit schmalem Chat links und dem
+Reiseplan rechts. Der Bot hat einen Avatar, bietet Schnellantworten als Klick-Chips an (das
+Textfeld bleibt immer nutzbar) und zeigt während Antworten und der Reiseplanung einen Ladeindikator.
+
 **Bewusst KEIN `--reload`:** unter Windows wechselt Uvicorns Reload-Modus intern von der
 ProactorEventLoop auf die SelectorEventLoop (Subprozess-fähig ist unter Windows nur Erstere) – das
 Claude Agent SDK startet beim Verbindungsaufbau aber die Claude-Code-CLI als Subprozess und würde
@@ -41,6 +47,7 @@ dann mit `NotImplementedError` abbrechen. Nach Codeänderungen den Server daher 
 | `chat.py` | Einstiegspunkt für den interaktiven Chat (Konsole/Mikrofon). |
 | `webapp.py` | Einstiegspunkt für dieselbe Dialoglogik als Browser-Oberfläche (FastAPI + WebSocket), inkl. Foto-Karten im fertigen Reiseplan. |
 | `static/index.html` | Chat-Oberfläche + Ergebnis-Karten für `webapp.py` (eine einzelne, abhängigkeitsfreie HTML-Datei). |
+| `static/img/` | Bot-Avatar (`avatar.svg`, eigene Grafik) und lizenzfreie Unsplash-Standardfotos für Hin-/Rückreise-Karten (`bahn.jpg`, `auto.jpg`, `bus.jpg`), siehe `doku/32_stage32_echte_reisefotos_eingabe_ausblenden/`. |
 | `pruefe_planung.py` | Testet NUR die deterministische Planung (POI-Suche, Optimierung 1+2) direkt, OHNE Dialog/LLM – baut eine `ReiseAnfrage` direkt aus `planungs_testfaelle/*.json`. Schneller (Sekunden statt Minuten), zuverlässigerer Standardweg zum Testen von Planungsänderungen – siehe ENTSCHEIDUNGSLOG.md, Phase 25. |
 | `src/` | Der eigentliche Quellcode (siehe Architektur-Schema unten). |
 | `tests/` | Automatisierte Tests; `tests/conftest.py` dokumentiert, welche Datei welche Tests hat und warum. |

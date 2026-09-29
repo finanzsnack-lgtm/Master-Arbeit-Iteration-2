@@ -1,6 +1,5 @@
 """Tests für die Reiseplan-Ausgabe (src/ausgabe/reiseplan.py)."""
 import csv
-import re
 
 from src.api.typen import POI, ReiseAlternative, Teilstrecke
 from src.ausgabe.reiseplan import Reiseplan, als_html, als_kartendaten, als_text, routen_link, speichere_poi_uebersicht
@@ -81,22 +80,31 @@ def test_als_text_tag1_nennt_ankunft_und_check_in():
     assert "Tag 1 (Ankunft)" in text
     assert "Ankunft mit Bahn nach 18h 39min – danach Check-in in der Unterkunft." in text
     assert "Ab Ankunft:" in text
-    assert "nach 15min: Kletterroute XY (bis 3h 15min, Score 3.0)" in text
-    # keine erfundene Uhrzeit wie "09:15" im Text (kein echtes Abfahrtsdatum vorhanden, Grundprinzip 1) –
-    # Zeiten bleiben relativ ("nach Xmin"/"XhYmin"), kein HH:MM-Muster.
-    assert not re.search(r"\b\d{1,2}:\d{2}\b", text)
+    # Nutzerfeedback nach echtem Browser-Test (Phase 57/58, siehe
+    # doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md): weder eine nackte relative Dauer
+    # ("nach 15min", missverständlich als Aufenthaltsdauer lesbar) noch eine erfundene/angenommene
+    # Uhrzeit ("ca. 09:15 Uhr") – stattdessen eine relative Dauer MIT Ankerwort direkt am Wert
+    # ("15min nach Ankunft"), dadurch eindeutig als Zeitpunkt seit Ankunft erkennbar, keine
+    # erfundene Uhrzeit (Grundprinzip 1 bleibt gewahrt).
+    assert "15min nach Ankunft: Kletterroute XY (bis 3h 15min nach Ankunft, Score 3.0)" in text
 
 
-def test_als_text_ohne_tagesstart_minuten_bleibt_relativ_auch_ab_tag2():
+def test_als_text_ohne_tagesstart_minuten_zeigt_anker_auch_ab_tag2():
+    # Ohne F20-Antwort ist an KEINEM Tag eine echte Uhrzeit bekannt – ab Tag 2 lautet der Anker
+    # "Tagesbeginn" statt "Ankunft" (siehe test_als_text_tag1_nennt_ankunft_und_check_in).
     tag1 = Tagesroute(besuche=[Besuch(poi=_POI, ankunft=15, wartezeit=0, abfahrt=195)])
     tag2 = Tagesroute(besuche=[Besuch(poi=_POI, ankunft=30, wartezeit=0, abfahrt=210)])
     text = als_text(_basis_plan(tagesrouten=[tag1, tag2]))
-    assert not re.search(r"\b\d{1,2}:\d{2}\b", text)
+    assert "30min nach Tagesbeginn" in text
+    assert "bis 3h 30min nach Tagesbeginn" in text
+    assert "nicht als Aufenthaltsdauer" in text  # einmaliger Hinweis, siehe _uhrzeit_hinweis_text
+    assert "ca." not in text  # keine angenommene Uhrzeit mehr (verworfen, siehe Phase 58)
 
 
 def test_als_text_mit_tagesstart_minuten_zeigt_echte_uhrzeit_ab_tag2_nicht_tag1():
-    # Regression (siehe Projektkonversation: "es stehen gar keine Uhrzeiten dran") – NUR ab Tag 2
-    # echte Uhrzeiten, Tag 1 bleibt relativ (keine reale Ankunftsuhrzeit der Hinreise bekannt).
+    # Ab Tag 2 mit F20-Antwort: ECHTE Uhrzeit. Tag 1 bleibt IMMER relativ zur Ankunft, weil die
+    # tatsächliche Ankunftsuhrzeit der Hinreise nirgends bekannt ist (Grundprinzip 1) – siehe
+    # reiseplan.py `_zeitpunkt_text`.
     tag1 = Tagesroute(besuche=[Besuch(poi=_POI, ankunft=15, wartezeit=0, abfahrt=195)])
     tag2 = Tagesroute(besuche=[Besuch(poi=_POI, ankunft=30, wartezeit=0, abfahrt=210)])
     text = als_text(_basis_plan(tagesrouten=[tag1, tag2], tagesstart_minuten=9 * 60))
@@ -104,9 +112,12 @@ def test_als_text_mit_tagesstart_minuten_zeigt_echte_uhrzeit_ab_tag2_nicht_tag1(
     zeilen = text.splitlines()
     tag1_index = next(i for i, z in enumerate(zeilen) if z.startswith("Tag 1"))
     tag2_index = next(i for i, z in enumerate(zeilen) if z.startswith("Tag 2"))
-    assert not any(re.search(r"\b\d{1,2}:\d{2}\b", z) for z in zeilen[tag1_index:tag2_index])
-    assert any("09:30" in z for z in zeilen[tag2_index:])  # 09:00 + 30 Min.
-    assert any("12:30" in z for z in zeilen[tag2_index:])  # 09:00 + 210 Min.
+    tag1_zeilen = zeilen[tag1_index:tag2_index]
+    tag2_zeilen = zeilen[tag2_index:]
+    assert any("nach Ankunft" in z and "15min" in z for z in tag1_zeilen)
+    assert not any("nach Ankunft" in z or "nach Tagesbeginn" in z for z in tag2_zeilen)
+    assert any("09:30" in z for z in tag2_zeilen)  # 09:00 + 30 Min., echte Uhrzeit
+    assert any("12:30" in z for z in tag2_zeilen)  # 09:00 + 210 Min.
 
 
 def test_als_text_uhrzeit_hinweis_nur_wenn_tagesstart_minuten_gesetzt():
@@ -587,6 +598,70 @@ def test_als_kartendaten_zeigt_hinreise_und_rueckreise_getrennt():
     daten = als_kartendaten(_basis_plan(hinreise=_BAHN, rueckreise=rueck), lambda _pid: None)
     assert daten["hinreise"]["name"] == "Hinreise: Bahn"
     assert daten["rueckreise"]["name"] == "Rückreise: Auto"
+
+
+def test_als_kartendaten_zeigt_standardbild_je_verkehrsmittel():
+    # Iteration 2, Stage 30/32 (Nutzerfeedback): Hin-/Rückreise haben kein echtes Google-Foto (kein
+    # einzelner "Ort"), bekommen stattdessen ein echtes Standardfoto je Verkehrsmittel (seit Stage 32
+    # lizenzfreie Unsplash-Fotos statt der anfänglichen selbst gezeichneten SVG-Icons).
+    rueck = BewerteteAlternative(
+        alternative=ReiseAlternative(verkehrsmittel="Auto", dauer_minuten=280, kosten_euro=90, distanz_km=500),
+        co2_kg=20.0, score=0.4,
+    )
+    daten = als_kartendaten(_basis_plan(hinreise=_BAHN, rueckreise=rueck), lambda _pid: None)
+    assert daten["hinreise"]["foto_url"] == "/static/img/bahn.jpg"
+    assert daten["rueckreise"]["foto_url"] == "/static/img/auto.jpg"
+
+
+def test_als_kartendaten_standardbild_fuer_fernbus_und_unbekanntes_verkehrsmittel():
+    fernbus = BewerteteAlternative(
+        alternative=ReiseAlternative(verkehrsmittel="Fernbus", dauer_minuten=400, kosten_euro=40, distanz_km=500),
+        co2_kg=15.0, score=0.3,
+    )
+    unbekannt = BewerteteAlternative(
+        alternative=ReiseAlternative(verkehrsmittel="Zeppelin", dauer_minuten=400, kosten_euro=40, distanz_km=500),
+        co2_kg=15.0, score=0.3,
+    )
+    daten = als_kartendaten(_basis_plan(hinreise=fernbus, rueckreise=unbekannt), lambda _pid: None)
+    assert daten["hinreise"]["foto_url"] == "/static/img/bus.jpg"
+    assert daten["rueckreise"]["foto_url"] is None  # kein erzwungenes, irreführendes Bild
+
+
+def test_als_kartendaten_ohne_verleih_liefert_none():
+    daten = als_kartendaten(_basis_plan(), lambda _pid: None)
+    assert daten["verleih"] is None
+
+
+def test_als_kartendaten_zeigt_verleih_karte_mit_fahrzeugtyp():
+    verleih_poi = POI(id=1, name="Rad-Verleih Zentrum", kategorie="fahrradverleih", x=0.0, y=0.0, score=0.0,
+                       required_time=0, opening=0, closing=1440, place_id="verleih-1")
+    daten = als_kartendaten(
+        _basis_plan(lokaler_verleih_poi=verleih_poi, lokales_leihfahrzeug_gewuenscht="Fahrrad"),
+        lambda pid: f"/fotos/{pid}.jpg" if pid else None,
+    )
+    assert daten["verleih"]["name"] == "Rad-Verleih Zentrum"
+    assert daten["verleih"]["kategorie"] == "Verleih: Fahrrad"
+    assert daten["verleih"]["foto_url"] == "/fotos/verleih-1.jpg"
+    assert "query_place_id=verleih-1" in daten["verleih"]["maps_link"]
+    assert daten["verleih"]["label"] is None  # kein "Vorschlag"-Badge, ist ein bestätigter Fund
+    # Ohne bekannte Unterkunfts-Koordinaten kein geratener Startpunkt (Grundprinzip 1).
+    assert daten["verleih"]["routen_link"] is None
+
+
+def test_als_kartendaten_verleih_karte_zeigt_route_ab_unterkunft():
+    # Nutzerfeedback: "Route ansehen"-Link wie bei den Tages-POI-Karten, hier IMMER von der
+    # Unterkunft zum Verleih (siehe doku/34_stage34_verleih_routenlink/README.md).
+    verleih_poi = POI(id=1, name="Rad-Verleih Zentrum", kategorie="fahrradverleih", x=48.14, y=11.58, score=0.0,
+                       required_time=0, opening=0, closing=1440, place_id="verleih-1")
+    daten = als_kartendaten(
+        _basis_plan(lokaler_verleih_poi=verleih_poi, unterkunft_koordinaten=(48.13, 11.57)),
+        lambda _pid: None,
+    )
+    link = daten["verleih"]["routen_link"]
+    assert link is not None
+    assert "origin=48.13%2C11.57" in link
+    assert "destination=48.14%2C11.58" in link
+    assert "travelmode=walking" in link
 
 
 def test_als_kartendaten_zeigt_vorschlaege_an_leerem_tag():

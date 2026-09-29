@@ -12,13 +12,17 @@ _BAHN = BewerteteAlternative(
 
 
 class _FakeClient:
-    """Simuliert `MapsClient.lade_foto` – Erfolg NUR für place_ids in `funktionierende_ids`
-    (referenzen folgen im Test der Konvention "ref-<place_id>"), damit sowohl der Erfolgs- als
-    auch der ehrliche Fehlschlagsfall getestet werden kann."""
+    """Simuliert `MapsClient.lade_foto`/`hole_foto_referenz` – Erfolg NUR für place_ids in
+    `funktionierende_ids` (Referenzen folgen im Test der Konvention "ref-<place_id>"), damit sowohl
+    der Erfolgs- als auch der ehrliche Fehlschlagsfall getestet werden kann. `nachlade_ids` simuliert
+    den Fallback (Iteration 2, Stage 30): fehlt `foto_referenz` bei einem POI, liefert
+    `hole_foto_referenz` für genau diese place_ids nachträglich eine Referenz."""
 
-    def __init__(self, funktionierende_ids: set[str]):
+    def __init__(self, funktionierende_ids: set[str], nachlade_ids: set[str] = frozenset()):
         self._funktionierende_referenzen = {f"ref-{place_id}" for place_id in funktionierende_ids}
+        self._nachlade_ids = nachlade_ids
         self.aufrufe: list[tuple[str, str]] = []
+        self.nachlade_aufrufe: list[str] = []
 
     def lade_foto(self, foto_referenz: str, ziel_pfad: str, max_breite: int = 640) -> bool:
         self.aufrufe.append((foto_referenz, ziel_pfad))
@@ -28,6 +32,10 @@ class _FakeClient:
                 datei.write("fake")
         return erfolgreich
 
+    def hole_foto_referenz(self, place_id: str | None) -> str | None:
+        self.nachlade_aufrufe.append(place_id or "")
+        return f"ref-{place_id}" if place_id in self._nachlade_ids else None
+
 
 def _basis_plan(**zusatz) -> Reiseplan:
     parameter = {"hinreise": _BAHN, "tagesrouten": [], "rueckreise": _BAHN}
@@ -35,9 +43,17 @@ def _basis_plan(**zusatz) -> Reiseplan:
     return Reiseplan(**parameter)
 
 
+def _poi(place_id: str, foto_referenz: str | None = None, **zusatz) -> POI:
+    basis = {
+        "id": 1, "name": f"POI {place_id}", "kategorie": "museum", "x": 0.0, "y": 0.0, "score": 1.0,
+        "required_time": 60, "opening": 0, "closing": 600, "place_id": place_id, "foto_referenz": foto_referenz,
+    }
+    basis.update(zusatz)
+    return POI(**basis)
+
+
 def test_laedt_foto_fuer_unterkunft_und_eingeplante_pois(tmp_path):
-    poi = POI(id=1, name="Kletterroute XY", kategorie="klettern", x=0.0, y=0.0, score=3.0,
-              required_time=180, opening=0, closing=600, place_id="poi-1", foto_referenz="ref-poi-1")
+    poi = _poi("poi-1", foto_referenz="ref-poi-1")
     tag1 = Tagesroute(besuche=[Besuch(poi=poi, ankunft=15, wartezeit=0, abfahrt=195)])
     plan = _basis_plan(
         tagesrouten=[tag1], unterkunft_name="Hotel Zentral", unterkunft_place_id="hotel-1",
@@ -52,27 +68,20 @@ def test_laedt_foto_fuer_unterkunft_und_eingeplante_pois(tmp_path):
     assert (tmp_path / "sitzung" / "poi-1.jpg").exists()
 
 
-def test_ueberspringt_pois_ohne_foto_referenz_oder_place_id(tmp_path):
-    ohne_foto = POI(id=1, name="Ohne Foto", kategorie="museum", x=0.0, y=0.0, score=1.0,
-                     required_time=60, opening=0, closing=600, place_id="poi-1")
-    ohne_place_id = POI(id=2, name="Mock-POI", kategorie="park", x=0.0, y=0.0, score=1.0,
-                         required_time=60, opening=0, closing=600, foto_referenz="ref-egal")
-    tag1 = Tagesroute(besuche=[
-        Besuch(poi=ohne_foto, ankunft=15, wartezeit=0, abfahrt=75),
-        Besuch(poi=ohne_place_id, ankunft=80, wartezeit=0, abfahrt=140),
-    ])
+def test_ueberspringt_pois_ohne_place_id(tmp_path):
+    ohne_place_id = _poi(place_id=None, foto_referenz="ref-egal")
+    tag1 = Tagesroute(besuche=[Besuch(poi=ohne_place_id, ankunft=15, wartezeit=0, abfahrt=75)])
     plan = _basis_plan(tagesrouten=[tag1])
-    client = _FakeClient(funktionierende_ids={"poi-1", "egal"})
+    client = _FakeClient(funktionierende_ids={"egal"})
 
     dateien = lade_fotos_fuer_plan(plan, client, tmp_path / "sitzung")
 
     assert dateien == {}
-    assert client.aufrufe == []  # kein einziger Download-Versuch, da nie beides gesetzt war
+    assert client.aufrufe == []  # ohne place_id kann kein Dateiname gebildet werden
 
 
 def test_gescheiterter_download_landet_nicht_im_ergebnis(tmp_path):
-    poi = POI(id=1, name="Kletterroute XY", kategorie="klettern", x=0.0, y=0.0, score=3.0,
-              required_time=180, opening=0, closing=600, place_id="poi-1", foto_referenz="ref-poi-1")
+    poi = _poi("poi-1", foto_referenz="ref-poi-1")
     tag1 = Tagesroute(besuche=[Besuch(poi=poi, ankunft=15, wartezeit=0, abfahrt=195)])
     plan = _basis_plan(tagesrouten=[tag1])
     client = _FakeClient(funktionierende_ids=set())  # jeder Download schlägt fehl
@@ -82,15 +91,64 @@ def test_gescheiterter_download_landet_nicht_im_ergebnis(tmp_path):
     assert dateien == {}
 
 
-def test_weitere_empfehlungen_werden_nicht_heruntergeladen(tmp_path):
-    # Bewusst NUR eingeplante POIs (Tagesrouten), nicht `weitere_aktivitaeten_empfehlungen` – siehe
-    # Moduldoku: die sind kein Teil des konkreten Vorschlags.
-    nicht_eingeplant = POI(id=2, name="Nicht eingeplant", kategorie="museum", x=0.0, y=0.0, score=1.0,
-                            required_time=60, opening=0, closing=600, place_id="poi-2", foto_referenz="ref-poi-2")
-    plan = _basis_plan(weitere_aktivitaeten_empfehlungen=[nicht_eingeplant])
-    client = _FakeClient(funktionierende_ids={"poi-2"})
+def test_ohne_foto_referenz_greift_nachlade_fallback(tmp_path):
+    # Iteration 2, Stage 30 (Nutzerfeedback nach echtem Browser-Test): fehlt `foto_referenz` (die
+    # ursprüngliche Suche lieferte kein `photos`-Feld), wird VOR dem Aufgeben zusätzlich
+    # `hole_foto_referenz` (Places Details) versucht.
+    ohne_foto = _poi("poi-1")  # foto_referenz=None
+    tag1 = Tagesroute(besuche=[Besuch(poi=ohne_foto, ankunft=15, wartezeit=0, abfahrt=75)])
+    plan = _basis_plan(tagesrouten=[tag1])
+    client = _FakeClient(funktionierende_ids={"poi-1"}, nachlade_ids={"poi-1"})
+
+    dateien = lade_fotos_fuer_plan(plan, client, tmp_path / "sitzung")
+
+    assert dateien == {"poi-1": "poi-1.jpg"}
+    assert client.nachlade_aufrufe == ["poi-1"]
+
+
+def test_nachlade_fallback_ohne_treffer_bleibt_ohne_foto(tmp_path):
+    ohne_foto = _poi("poi-1")  # foto_referenz=None, auch Details liefert nichts
+    tag1 = Tagesroute(besuche=[Besuch(poi=ohne_foto, ankunft=15, wartezeit=0, abfahrt=75)])
+    plan = _basis_plan(tagesrouten=[tag1])
+    client = _FakeClient(funktionierende_ids=set(), nachlade_ids=set())
 
     dateien = lade_fotos_fuer_plan(plan, client, tmp_path / "sitzung")
 
     assert dateien == {}
-    assert client.aufrufe == []
+    assert client.aufrufe == []  # kein lade_foto-Versuch ohne jede Referenz
+
+
+def test_weitere_empfehlungen_und_vorschlag_kategorien_werden_jetzt_heruntergeladen(tmp_path):
+    # Korrektur nach Nutzerfeedback (Stage 30): bis Stage 29 blieben "Weitere Empfehlungen" und
+    # alle "Vorschlag"-Kategorien IMMER ohne Foto (siehe Moduldoku). Jetzt werden sie genauso wie
+    # eingeplante POIs behandelt.
+    weitere_empfehlung = _poi("poi-empf", foto_referenz="ref-poi-empf")
+    restaurant = _poi("poi-rest", foto_referenz="ref-poi-rest")
+    tour = _poi("poi-tour", foto_referenz="ref-poi-tour")
+    lernaktivitaet = _poi("poi-lern", foto_referenz="ref-poi-lern")
+    markt = _poi("poi-markt", foto_referenz="ref-poi-markt")
+    plan = _basis_plan(
+        weitere_aktivitaeten_empfehlungen=[weitere_empfehlung],
+        beispielrestaurants=[restaurant],
+        tour_tag_beispiele=[tour],
+        lernaktivitaet_tag_beispiele=[lernaktivitaet],
+        markt_beispiele=[markt],
+    )
+    client = _FakeClient(funktionierende_ids={"poi-empf", "poi-rest", "poi-tour", "poi-lern", "poi-markt"})
+
+    dateien = lade_fotos_fuer_plan(plan, client, tmp_path / "sitzung")
+
+    assert dateien == {
+        "poi-empf": "poi-empf.jpg", "poi-rest": "poi-rest.jpg", "poi-tour": "poi-tour.jpg",
+        "poi-lern": "poi-lern.jpg", "poi-markt": "poi-markt.jpg",
+    }
+
+
+def test_lokaler_verleih_poi_wird_heruntergeladen(tmp_path):
+    verleih = _poi("poi-verleih", foto_referenz="ref-poi-verleih", kategorie="autoverleih")
+    plan = _basis_plan(lokaler_verleih_poi=verleih, lokales_leihfahrzeug_gewuenscht="Auto")
+    client = _FakeClient(funktionierende_ids={"poi-verleih"})
+
+    dateien = lade_fotos_fuer_plan(plan, client, tmp_path / "sitzung")
+
+    assert dateien == {"poi-verleih": "poi-verleih.jpg"}

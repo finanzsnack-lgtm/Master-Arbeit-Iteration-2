@@ -57,6 +57,11 @@ class Einstellungen:
     # Nebenbedingung in `toptw.py::simuliere_route`, zusätzlich zum Gesamtbudget inkl. Fahrzeit.
     max_aktivitaetszeit_minuten: int = int(os.getenv("MAX_AKTIVITAETSZEIT_MINUTEN", "360"))
 
+    # ENTFERNT (Phase 56 -> Phase 58): ein angenommener Standard-Tagesbeginn für Tag 1/Tage ohne
+    # F20-Antwort ("ca. 09:00 Uhr") wurde in Phase 56 eingeführt, nach echtem Browser-Test aber
+    # wieder verworfen (Nutzerwunsch: keine Uhrzeit dort, auch keine als Annahme markierte – siehe
+    # reiseplan.py `_zeitpunkt_text`, doku/30_stage30_zeit_fotos_verleih_layout_avatar/README.md).
+
     # Modell für die Claude-Agent-SDK-Dialogsession (chat.py). Explizit
     # gesetzt statt das Modell der umgebenden Claude-Code-Session zu erben:
     # "Fable 5" (Session-Default) lief bei einem Testlauf ins Nutzungs-
